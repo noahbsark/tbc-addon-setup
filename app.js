@@ -97,3 +97,35 @@ form.addEventListener('submit', async event => {
     errorBox.hidden = false;
   } finally { button.disabled = false; button.firstElementChild.textContent = 'Generate my folder'; }
 });
+
+
+const previewImage = document.querySelector('.ui-preview figure img');
+const previewDialog = document.getElementById('preview-dialog');
+const openPreview = document.getElementById('open-preview');
+const closePreview = document.getElementById('close-preview');
+
+if (previewImage && previewDialog && openPreview && closePreview) {
+  const dialogImage = previewDialog.querySelector('.dialog-image');
+  const closeDialog = () => {
+    previewDialog.close();
+    document.body.classList.remove('dialog-open');
+  };
+
+  openPreview.addEventListener('click', () => {
+    if (!dialogImage.firstElementChild) {
+      const fullImage = previewImage.cloneNode();
+      fullImage.removeAttribute('loading');
+      fullImage.alt = previewImage.alt;
+      dialogImage.appendChild(fullImage);
+    }
+    previewDialog.showModal();
+    document.body.classList.add('dialog-open');
+    closePreview.focus();
+  });
+
+  closePreview.addEventListener('click', closeDialog);
+  previewDialog.addEventListener('click', (event) => {
+    if (event.target === previewDialog) closeDialog();
+  });
+  previewDialog.addEventListener('close', () => document.body.classList.remove('dialog-open'));
+}
