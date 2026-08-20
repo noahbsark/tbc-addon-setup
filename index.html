@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Build a ready-to-install Classic WoW TBC addon settings folder." />
+  <title>TBC Addon Setup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Marcellus&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="nav shell">
+    <a class="brand" href="#top" aria-label="TBC Addon Setup home"><span class="rune">T</span><span>TBC Addon Setup</span></a>
+    <a class="nav-link" href="#install">Install guide</a>
+  </header>
+
+  <main id="top">
+    <section class="hero shell">
+      <div class="eyebrow"><span></span> Burning Crusade Classic</div>
+      <h1>Your UI. Your character.<br><em>Ready in seconds.</em></h1>
+      <p class="lede">Enter your details and get a personalized addon settings folder—built in your browser and ready to drop into World of Warcraft.</p>
+    </section>
+
+    <section class="addon-import shell" aria-labelledby="addons-title">
+      <div class="import-copy">
+        <div class="eyebrow"><span></span> Install the addon pack</div>
+        <h2 id="addons-title">Start with the same addons</h2>
+        <p>In WowUp, choose <strong>Import</strong>, paste this collection string, and install the list before applying the settings below.</p>
+      </div>
+      <div class="import-box">
+        <textarea id="wowup-import" aria-label="WowUp addon collection import string" readonly></textarea>
+        <button id="copy-wowup" class="primary" type="button"><span>Copy WowUp import string</span><span aria-hidden="true">⧉</span></button>
+      </div>
+    </section>
+
+    <section class="builder shell" aria-labelledby="builder-title">
+      <div class="panel form-panel">
+        <div class="step-label">01 · Character details</div>
+        <h2 id="builder-title">Build your setup</h2>
+        <form id="setup-form" novalidate>
+          <label for="account">Account folder name <span aria-hidden="true">*</span></label>
+          <input id="account" name="account" autocomplete="off" placeholder="e.g. WOWACCOUNT1" required />
+          <p class="hint">Find this inside <code>WTF\Account</code></p>
+
+          <div class="field-row">
+            <div>
+              <label for="server">Server <span aria-hidden="true">*</span></label>
+              <input id="server" name="server" autocomplete="off" value="Nightslayer" placeholder="e.g. Nightslayer" required />
+            </div>
+            <div>
+              <label for="character">Character <span aria-hidden="true">*</span></label>
+              <input id="character" name="character" autocomplete="off" placeholder="e.g. Thrall" required />
+            </div>
+          </div>
+
+          <div id="form-error" class="error" role="alert" hidden></div>
+          <button class="primary" type="submit"><span>Generate my folder</span><span aria-hidden="true">↓</span></button>
+          <p class="privacy"><span>◆</span> Your details stay on this device</p>
+        </form>
+      </div>
+
+      <aside class="panel path-panel" aria-label="Folder preview">
+        <div class="step-label">02 · Destination</div>
+        <h2>Where to extract it</h2>
+        <div class="path-card"><span class="path-root">C:\Program Files (x86)\World of Warcraft\_anniversary_\</span></div>
+        <p class="archive-preview">The ZIP contains <strong>WTF\Account\<span id="path-account">ACCOUNTNAME</span>\<span id="path-server">Nightslayer</span>\<span id="path-character">CHARACTERNAME</span></strong></p>
+        <button id="copy-path" class="copy" type="button">Copy path <span aria-hidden="true">⧉</span></button>
+        <div class="notice"><span aria-hidden="true">!</span><p><strong>Back up your WTF folder first.</strong><br>Replacing settings can’t be undone unless you keep a copy.</p></div>
+      </aside>
+    </section>
+
+    <section id="install" class="install shell">
+      <div>
+        <div class="eyebrow"><span></span> After downloading</div>
+        <h2>Three steps to Azeroth</h2>
+      </div>
+      <ol>
+        <li><span>1</span><div><strong>Close the game</strong><p>Exit WoW completely before replacing any files.</p></div></li>
+        <li><span>2</span><div><strong>Open the game folder</strong><p>Open the `_anniversary_` folder shown above.</p></div></li>
+        <li><span>3</span><div><strong>Extract & replace</strong><p>Unzip the download there. Its WTF folder will merge into the correct account, server and character path.</p></div></li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="shell"><span>For World of Warcraft® Classic players</span><span>Not affiliated with Blizzard Entertainment</span></footer>
+  <script src="template-chunk-1.js"></script>
+  <script src="template-chunk-2.js"></script>
+  <script src="template-chunk-3.js"></script>
+  <script src="template-chunk-4.js"></script>
+  <script src="wowup-data.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
