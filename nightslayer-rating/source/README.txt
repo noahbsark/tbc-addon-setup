@@ -1,5 +1,10 @@
-NIGHTSLAYER RATING 1.2.3
+NIGHTSLAYER RATING 1.2.4
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.2.4
+---------------------
+- Increased focused exact-profile lookups from 10 to 25 per updater run while
+  retaining request pacing and the one-week successful-profile cache.
 
 WHAT CHANGED IN 1.2.3
 ---------------------
@@ -78,7 +83,7 @@ outside the game and writes Data.lua, which WoW reads at login or /reload.
    from their local WTF folders. Names encountered in Group Finder, unit
    tooltips, battlegrounds, or whispers are saved in this addon's queue.
 4. After WoW saves encountered names during logout, exit, or /reload, the
-   companion asks IronForge for exact record ratings for up to 10 profiles/run.
+   companion asks IronForge for exact record ratings for up to 25 profiles/run.
 5. New data appears at the next login or /reload. A running WoW client cannot
    hot-load an externally changed addon file.
 

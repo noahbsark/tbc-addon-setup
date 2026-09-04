@@ -18,7 +18,7 @@ $SharedSnapshotUrl = 'https://github.com/noahbsark/tbc-addon-setup/releases/down
 $SharedSnapshotMaxCompressedBytes = 10485760
 $SharedSnapshotMaxJsonChars = 52428800
 $SharedSnapshotMaxPlayers = 100000
-$ProfileLimitPerRun = 10
+$ProfileLimitPerRun = 25
 $ProfileRefreshSeconds = 604800
 $RequestRetentionSeconds = 2592000
 $ExactCacheRetentionSeconds = 7776000
@@ -384,7 +384,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.3 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.2.4 (local WoW addon updater; low-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -430,7 +430,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.3 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.2.4 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()

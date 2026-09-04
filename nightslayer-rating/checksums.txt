@@ -1,4 +1,4 @@
-Nightslayer Rating 1.2.3 SHA-256 checksums
+Nightslayer Rating 1.2.4 SHA-256 checksums
 
-3d4b1be520e4b03d568f26bb80ebe87ff6609e71a399f26b21cfc25cf8c16664  NightslayerRating-1.2.3-Windows.zip
-c1f67eeb45da02aaf9f760337cddcb023bc51354713d9bf321fc7785c368cdee  NightslayerRating-1.2.3-AddonOnly.zip
+ff98540ee68f45afecac6e16fe83302c355f905b6b9bd03c079db551b32c62a8  NightslayerRating-1.2.4-Windows.zip
+563fce622e8b1bdcd4501328344f64e9d266bf808548a7d05d68293a01a77867  NightslayerRating-1.2.4-AddonOnly.zip
