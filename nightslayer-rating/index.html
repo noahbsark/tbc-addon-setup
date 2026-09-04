@@ -271,12 +271,12 @@
       <div>
         <p class="eyebrow">TBC Anniversary · Nightslayer US</p>
         <h1>Know the rating <em>before you invite.</em></h1>
-        <p class="lede">Hover a player in Blizzard's Group Finder and see their current and highest recorded 2v2, 3v3, and 5v5 arena ratings—right in the normal tooltip.</p>
+        <p class="lede">See a player's current and highest recorded 2v2, 3v3, and 5v5 arena ratings in Group Finder, on world hover, or when they whisper you.</p>
         <div class="actions">
-          <a class="button" href="downloads/NightslayerRating-1.0.0-Windows.zip" download>Download for Windows <span aria-hidden="true">↓</span></a>
+          <a class="button" href="downloads/NightslayerRating-1.0.1-Windows.zip" download>Download for Windows <span aria-hidden="true">↓</span></a>
           <a class="button secondary" href="#downloads">Other download</a>
         </div>
-        <p class="fine">Version 1.0.0 · Free · Windows 10/11 · No account or API key</p>
+        <p class="fine">Version 1.0.1 · Free · Windows 10/11 · Fixes the Vanilla Style tooltip and updater error</p>
       </div>
 
       <aside class="tooltip-demo" aria-label="Example rating tooltip for Reefey">
@@ -299,9 +299,9 @@
 
     <section class="shell" aria-labelledby="how-title">
       <div class="section-head">
-        <p class="eyebrow">Built for Group Finder</p>
+        <p class="eyebrow">Ratings where you need them</p>
         <h2 id="how-title">The context you wanted, where you wanted it.</h2>
-        <p>The addon adds ratings to the tooltip you already use. It does not replace Group Finder or add another window.</p>
+        <p>The addon adds ratings to the Group Finder tooltip and normal player tooltip. Whispers get one private local rating summary in chat—nothing is sent to the other player.</p>
       </div>
 
       <div class="showcase">
@@ -313,7 +313,7 @@
           <div class="feature"><b>1</b><div><strong>Current ratings</strong><p>The updater refreshes the Nightslayer leaderboard cache in the background.</p></div></div>
           <div class="feature"><b>2</b><div><strong>Exact lifetime highs</strong><p>Names you encounter are queued for a focused IronForge profile lookup after WoW saves on logout.</p></div></div>
           <div class="feature"><b>3</b><div><strong>Honest fallback</strong><p>Until an exact lookup finishes, seasonal data is clearly labeled “Best cached*” instead of being presented as exact.</p></div></div>
-          <div class="feature"><b>4</b><div><strong>Quiet updates</strong><p>No updater window during normal operation. Refreshed data appears next login or after <code>/reload</code>.</p></div></div>
+          <div class="feature"><b>4</b><div><strong>Hover and whisper support</strong><p>Ratings appear on world-player hovers, while incoming and outgoing whispers get a local chat summary once per character.</p></div></div>
         </div>
       </div>
     </section>
@@ -326,7 +326,7 @@
       <div class="steps">
         <div class="step"><span class="step-number">01</span><h3>Close WoW</h3><p>Exit TBC Anniversary completely so Windows can place the addon safely.</p></div>
         <div class="step"><span class="step-number">02</span><h3>Extract the ZIP</h3><p>Right-click the downloaded file, choose “Extract All,” then open the extracted folder.</p></div>
-        <div class="step"><span class="step-number">03</span><h3>Run Install.cmd</h3><p>The installer normally finds <code>_anniversary_</code> itself. Start WoW and hover a Group Finder name.</p></div>
+        <div class="step"><span class="step-number">03</span><h3>Run Install.cmd</h3><p>The installer normally finds <code>_anniversary_</code> itself. Start WoW and hover a Group Finder or world-player name.</p></div>
       </div>
     </section>
 
@@ -343,7 +343,7 @@
           <h3>Windows automatic bundle</h3>
           <p>Addon, installer, background updater, manual update shortcut, documentation, and uninstaller.</p>
           <ul><li>Automatic rating refreshes</li><li>Exact highs for encountered names</li><li>One-click uninstall included</li></ul>
-          <a class="button" href="downloads/NightslayerRating-1.0.0-Windows.zip" download>Download v1.0.0 · 161 KB <span aria-hidden="true">↓</span></a>
+          <a class="button" href="downloads/NightslayerRating-1.0.1-Windows.zip" download>Download v1.0.1 · 168 KB <span aria-hidden="true">↓</span></a>
         </article>
 
         <article class="download-card">
@@ -351,7 +351,7 @@
           <h3>Addon only</h3>
           <p>Just the <code>NightslayerRating</code> addon folder and the rating snapshot packaged with this release.</p>
           <ul><li>Manual Interface/AddOns install</li><li>No Windows scheduled task</li><li>Ratings will not refresh automatically</li></ul>
-          <a class="button secondary" href="downloads/NightslayerRating-1.0.0-AddonOnly.zip" download>Download addon only · 154 KB <span aria-hidden="true">↓</span></a>
+          <a class="button secondary" href="downloads/NightslayerRating-1.0.1-AddonOnly.zip" download>Download addon only · 155 KB <span aria-hidden="true">↓</span></a>
         </article>
       </div>
     </section>
@@ -372,11 +372,11 @@
           <ul>
             <li>No account credentials or API keys.</li>
             <li>No reading game memory, controlling WoW, or automating gameplay.</li>
-            <li>The updater reads only this addon's SavedVariables to find public character names encountered in Group Finder.</li>
+            <li>The updater reads only this addon's SavedVariables to find public character names encountered in Group Finder, player hovers, or whispers.</li>
             <li>Local cache and logs stay in <code>%LOCALAPPDATA%\NightslayerRating</code>.</li>
             <li>IronForge can lag the live game, so the tooltip reflects the newest data IronForge publishes.</li>
           </ul>
-          <p><strong>Windows bundle SHA-256</strong><br><code>041ceda6ee97d0de7535b48a440d49e33e47185184405502788e99654ba4e33c</code></p>
+          <p><strong>Windows bundle SHA-256</strong><br><code>7c6233ebec2a96928ac34eebce37df4701d8aae9edb85aa44960d8a013254ed4</code></p>
         </div>
       </div>
     </section>
@@ -384,7 +384,7 @@
 
   <footer>
     <div class="footer-row shell">
-      <span>Nightslayer Rating v1.0.0 · Free community addon</span>
+      <span>Nightslayer Rating v1.0.1 · Free community addon</span>
       <span>Not affiliated with Blizzard Entertainment or IronForge</span>
     </div>
   </footer>

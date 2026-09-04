@@ -227,7 +227,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.0 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.0.1 (local WoW addon updater; low-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -573,7 +573,7 @@ function Write-LuaData {
         }
 
         $escapedName = Escape-LuaString ([string]$player.name)
-        [void]$builder.AppendLine(('        ["{0}"] = {' -f $escapedName))
+        [void]$builder.AppendLine(('        ["{0}"] = {{' -f $escapedName))
         [void]$builder.AppendLine(('            name = "{0}",' -f $escapedName))
         [void]$builder.AppendLine(('            current = {0},' -f (Format-LuaRatingMap $player.current)))
         [void]$builder.AppendLine(('            best = {0},' -f (Format-LuaRatingMap $best)))

@@ -2,9 +2,9 @@
 ## Title: Nightslayer Rating
 ## Notes: Shows IronForge TBC Anniversary arena ratings in Group Finder tooltips.
 ## Author: OpenAI Codex
-## Version: 1.0.0
+## Version: 1.0.1
 ## SavedVariables: NightslayerRatingRequests, NightslayerRatingSettings
-## OptionalDeps: Blizzard_GroupFinder
+## OptionalDeps: Blizzard_GroupFinder, Blizzard_GroupFinder_VanillaStyle
 
 Data.lua
 Core.lua

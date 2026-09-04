@@ -15,7 +15,10 @@ NightslayerRatingSettings = NightslayerRatingSettings or { enabled = true }
 
 local playerIndex = {}
 local lowerIndex = {}
-local hooksInstalled = false
+local modernTooltipHookInstalled = false
+local modernEntryHookInstalled = false
+local vanillaTooltipHookInstalled = false
+local whisperNotified = {}
 
 local function NormalizeRealm(realm)
     if type(realm) ~= "string" then
@@ -214,6 +217,36 @@ local function NameFromTooltip(tooltip)
     return ok and name or nil
 end
 
+local function PlayerNameFromUnitTooltip(tooltip)
+    if not tooltip or not tooltip.GetUnit then
+        return nil, nil
+    end
+
+    local _, unitToken = tooltip:GetUnit()
+    if not unitToken or type(UnitIsPlayer) ~= "function" or not UnitIsPlayer(unitToken) then
+        return nil, nil
+    end
+
+    local name
+    local realm
+    if type(UnitFullName) == "function" then
+        name, realm = UnitFullName(unitToken)
+    elseif type(UnitName) == "function" then
+        name = UnitName(unitToken)
+    end
+
+    name = UsableLeaderName(name)
+    if not name then
+        return nil, nil
+    end
+
+    if not realm or realm == "" then
+        realm = DEFAULT_REALM
+    end
+
+    return name .. "-" .. realm, unitToken
+end
+
 local function LookupRecord(name)
     if not name then
         return nil
@@ -228,6 +261,57 @@ local function RatingText(value)
         return "--"
     end
     return tostring(math.floor(value + 0.5))
+end
+
+local function ShowWhisperRating(fullName)
+    if not NightslayerRatingSettings.enabled then
+        return
+    end
+
+    local name, realm = SplitPlayerName(fullName)
+    name = UsableLeaderName(name)
+    if not name or not IsSupportedRealm(realm) then
+        return
+    end
+
+    local notificationKey = string.lower(name)
+    if whisperNotified[notificationKey] then
+        return
+    end
+    whisperNotified[notificationKey] = true
+
+    QueuePlayer(name .. "-" .. DEFAULT_REALM, true)
+
+    local prefix = "|cffffd200[NSR]|r " .. name .. ": "
+    local record = LookupRecord(name)
+    if not record then
+        DEFAULT_CHAT_FRAME:AddMessage(prefix .. "rating not cached yet; lookup queued automatically")
+        return
+    end
+
+    local parts = {}
+    local exact = record.exact == true
+    for _, bracket in ipairs(BRACKETS) do
+        local current = record.current and record.current[bracket]
+        local best = record.best and record.best[bracket]
+        if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
+            parts[#parts + 1] = string.format(
+                "%dv%d %s current / %s %s%s",
+                bracket,
+                bracket,
+                RatingText(current),
+                RatingText(best),
+                exact and "high" or "best cached",
+                exact and "" or "*"
+            )
+        end
+    end
+
+    if #parts == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage(prefix .. "no tracked arena rating")
+    else
+        DEFAULT_CHAT_FRAME:AddMessage(prefix .. table.concat(parts, " | "))
+    end
 end
 
 local function AddRatingLines(tooltip, fullName, resultID)
@@ -304,14 +388,122 @@ local function AddByResultID(tooltip, resultID)
     return false
 end
 
-local function InstallHooks()
-    if hooksInstalled then
+local function HideVanillaRatingLines(tooltip)
+    if not tooltip or not tooltip.NightslayerRatingLines then
         return
     end
 
-    local installed = false
+    for _, line in ipairs(tooltip.NightslayerRatingLines) do
+        line:Hide()
+        line:ClearAllPoints()
+    end
+end
 
-    if type(LFGListUtil_SetSearchEntryTooltip) == "function" then
+local function GetVanillaRatingLine(tooltip, index)
+    tooltip.NightslayerRatingLines = tooltip.NightslayerRatingLines or {}
+    local line = tooltip.NightslayerRatingLines[index]
+
+    if not line then
+        line = tooltip:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        line:SetJustifyH("LEFT")
+        line:SetWordWrap(false)
+        tooltip.NightslayerRatingLines[index] = line
+    end
+
+    return line
+end
+
+local function AddVanillaRatingBlock(tooltip, fullName, resultID)
+    if not tooltip then
+        return
+    end
+
+    HideVanillaRatingLines(tooltip)
+    if not NightslayerRatingSettings.enabled then
+        return
+    end
+
+    local name, realm = SplitPlayerName(fullName)
+    if not name or not IsSupportedRealm(realm) then
+        return
+    end
+
+    QueuePlayer(name .. "-" .. DEFAULT_REALM, true)
+
+    local displayLines = {
+        { "IronForge Rating - Nightslayer", 1.00, 0.82, 0.00 },
+    }
+    local record = LookupRecord(name)
+
+    if not record then
+        displayLines[#displayLines + 1] = { "Current rating not cached yet", 0.75, 0.75, 0.75 }
+        displayLines[#displayLines + 1] = { "Lookup queued automatically", 0.35, 0.75, 1.00 }
+    else
+        local exact = record.exact == true
+        local foundRating = false
+
+        for _, bracket in ipairs(BRACKETS) do
+            local current = record.current and record.current[bracket]
+            local best = record.best and record.best[bracket]
+
+            if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
+                foundRating = true
+                local bestLabel = exact and "High" or "Best cached"
+                local suffix = exact and "" or "*"
+                displayLines[#displayLines + 1] = {
+                    string.format(
+                        "%dv%d  Current %s   %s %s%s",
+                        bracket,
+                        bracket,
+                        RatingText(current),
+                        bestLabel,
+                        RatingText(best),
+                        suffix
+                    ),
+                    0.35,
+                    0.75,
+                    1.00,
+                }
+            end
+        end
+
+        if not foundRating then
+            displayLines[#displayLines + 1] = { "No tracked arena rating", 0.75, 0.75, 0.75 }
+        elseif not exact then
+            displayLines[#displayLines + 1] = { "* Exact lifetime high is queued", 0.55, 0.55, 0.55 }
+        end
+    end
+
+    local baseHeight = tooltip:GetHeight()
+    local baseWidth = tooltip:GetWidth()
+    local lineHeight = 14
+    local firstLineY = -(baseHeight - 11)
+    local maxLineWidth = 0
+
+    for index, lineInfo in ipairs(displayLines) do
+        local line = GetVanillaRatingLine(tooltip, index)
+        line:SetText(lineInfo[1])
+        line:SetTextColor(lineInfo[2], lineInfo[3], lineInfo[4])
+        line:SetPoint("TOPLEFT", tooltip, "TOPLEFT", 11, firstLineY - ((index - 1) * lineHeight))
+        line:Show()
+        maxLineWidth = math.max(maxLineWidth, line:GetStringWidth())
+    end
+
+    tooltip:SetWidth(math.max(baseWidth, maxLineWidth + 22))
+    tooltip:SetHeight(baseHeight + (#displayLines * lineHeight) + 5)
+    tooltip.NightslayerRatingResultID = resultID
+end
+
+local function AddVanillaByResultID(tooltip, resultID)
+    HideVanillaRatingLines(tooltip)
+    local leaderName = GetLeaderName(resultID)
+    if leaderName then
+        AddVanillaRatingBlock(tooltip, leaderName, resultID)
+    end
+end
+
+local function InstallHooks()
+    if not modernTooltipHookInstalled and type(LFGListUtil_SetSearchEntryTooltip) == "function" then
         hooksecurefunc("LFGListUtil_SetSearchEntryTooltip", function(tooltip, resultID)
             if not AddByResultID(tooltip, resultID) then
                 local name = NameFromTooltip(tooltip)
@@ -320,10 +512,10 @@ local function InstallHooks()
                 end
             end
         end)
-        installed = true
+        modernTooltipHookInstalled = true
     end
 
-    if type(LFGListSearchEntry_OnEnter) == "function" then
+    if not modernEntryHookInstalled and type(LFGListSearchEntry_OnEnter) == "function" then
         hooksecurefunc("LFGListSearchEntry_OnEnter", function(entry)
             local resultID = GetResultIDFromFrame(entry)
             if resultID then
@@ -335,10 +527,15 @@ local function InstallHooks()
                 end
             end
         end)
-        installed = true
+        modernEntryHookInstalled = true
     end
 
-    hooksInstalled = installed
+    if not vanillaTooltipHookInstalled and type(LFGBrowseSearchEntryTooltip_UpdateAndShow) == "function" then
+        hooksecurefunc("LFGBrowseSearchEntryTooltip_UpdateAndShow", function(tooltip, resultID)
+            AddVanillaByResultID(tooltip, resultID)
+        end)
+        vanillaTooltipHookInstalled = true
+    end
 end
 
 local function TrackSearchResults()
@@ -365,6 +562,19 @@ GameTooltip:HookScript("OnTooltipCleared", function(tooltip)
     tooltip.NightslayerRatingToken = nil
 end)
 
+GameTooltip:HookScript("OnTooltipSetUnit", function(tooltip)
+    C_Timer.After(0, function()
+        if not tooltip:IsShown() then
+            return
+        end
+
+        local fullName, unitToken = PlayerNameFromUnitTooltip(tooltip)
+        if fullName then
+            AddRatingLines(tooltip, fullName, "unit:" .. unitToken)
+        end
+    end)
+end)
+
 GameTooltip:HookScript("OnShow", function(tooltip)
     C_Timer.After(0, function()
         if not tooltip:IsShown() or tooltip.NightslayerRatingToken then
@@ -388,9 +598,11 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("LFG_LIST_SEARCH_RESULTS_RECEIVED")
 eventFrame:RegisterEvent("LFG_LIST_SEARCH_RESULT_UPDATED")
-eventFrame:SetScript("OnEvent", function(_, event, arg1)
+eventFrame:RegisterEvent("CHAT_MSG_WHISPER")
+eventFrame:RegisterEvent("CHAT_MSG_WHISPER_INFORM")
+eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "ADDON_LOADED" then
-        if arg1 == ADDON_NAME or arg1 == "Blizzard_GroupFinder" then
+        if arg1 == ADDON_NAME or arg1 == "Blizzard_GroupFinder" or arg1 == "Blizzard_GroupFinder_VanillaStyle" then
             InstallHooks()
         end
     elseif event == "PLAYER_LOGIN" then
@@ -402,6 +614,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
         if leaderName then
             QueuePlayer(leaderName, false)
         end
+    elseif event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_WHISPER_INFORM" then
+        ShowWhisperRating(arg2)
     end
 end)
 

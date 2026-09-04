@@ -1,11 +1,27 @@
-NIGHTSLAYER RATING 1.0.0
+NIGHTSLAYER RATING 1.0.1
 TBC Anniversary (Interface 20506) - Nightslayer US
+
+WHAT CHANGED IN 1.0.1
+---------------------
+- Added support for TBC Anniversary's Vanilla Style Group Finder tooltip.
+- Added ratings to the normal player tooltip when hovering a character in the
+  world or on a unit frame.
+- Added a private local rating summary when a character whispers you or you
+  whisper them (shown once per character per login; nothing is sent back).
+- Fixed the PowerShell error that could occur after exact profiles were fetched.
+
+If 1.0.0 is already installed, close WoW, extract this release, and run
+Install.cmd again. Your existing updater cache is preserved.
 
 WHAT IT DOES
 ------------
-Hover a player in Blizzard's Looking For Group / Group Finder panel. The normal
-tooltip gains IronForge 2v2, 3v3, and 5v5 rows showing current rating and the
-highest recorded rating.
+Hover a player in Blizzard's Looking For Group / Group Finder panel, in the
+world, or on a unit frame. The tooltip gains IronForge 2v2, 3v3, and 5v5 rows
+showing current rating and the highest recorded rating.
+
+When a character whispers you, or you whisper them, a private [NSR] line in
+your chat shows the same ratings once per character per login. The other player
+does not receive a message.
 
 INSTALLATION (WINDOWS)
 ----------------------
