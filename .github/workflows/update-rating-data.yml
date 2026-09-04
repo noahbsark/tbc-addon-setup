@@ -1,0 +1,46 @@
+name: Refresh rating snapshot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17,47 * * * *"
+  push:
+    paths:
+      - ".github/workflows/update-rating-data.yml"
+      - "central-rating-data/**"
+permissions:
+  contents: write
+
+concurrency:
+  group: rating-snapshot
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build shared snapshot
+        run: |
+          python central-rating-data/build_shared_cache.py \
+            --output shared-cache.json.gz \
+            --meta-output shared-cache.meta.json \
+            --lua-output shared-data.lua.gz
+
+      - name: Publish stable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view ratings-data --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create ratings-data \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Nightslayer Rating data" \
+              --notes "Automatically refreshed public arena-rating snapshot for Nightslayer and Dreamscythe."
+          fi
+          gh release upload ratings-data \
+            shared-cache.json.gz shared-cache.meta.json shared-data.lua.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
