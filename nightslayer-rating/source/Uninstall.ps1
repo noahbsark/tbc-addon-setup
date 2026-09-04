@@ -30,6 +30,14 @@ if (Test-Path -LiteralPath $runKey) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($wowPath)) {
+    try {
+        $wowPath = [IO.Path]::GetFullPath($wowPath.Trim().TrimEnd('\'))
+    } catch {
+        $wowPath = $null
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($wowPath) -and (Split-Path -Leaf $wowPath) -eq '_anniversary_') {
     $addonPath = Join-Path $wowPath 'Interface\AddOns\NightslayerRating'
     if ((Split-Path -Leaf $addonPath) -eq 'NightslayerRating' -and (Test-Path -LiteralPath $addonPath)) {
         Remove-Item -LiteralPath $addonPath -Recurse -Force

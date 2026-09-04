@@ -3,7 +3,7 @@ name: Refresh rating snapshot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17,47 * * * *"
+    - cron: "17 * * * *"
   push:
     paths:
       - ".github/workflows/update-rating-data.yml"
@@ -20,7 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Test snapshot publisher
         run: python -m unittest central-rating-data/test_build_shared_cache.py

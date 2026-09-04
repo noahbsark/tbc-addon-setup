@@ -4,16 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="Build a ready-to-install Classic WoW TBC addon settings folder." />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <title>TBC Addon Setup</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Marcellus&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="nav shell">
     <a class="brand" href="#top" aria-label="TBC Addon Setup home"><span class="rune">T</span><span>TBC Addon Setup</span></a>
-    <a class="nav-link" href="#install">Install guide</a>
+    <div class="nav-actions">
+      <a class="nav-link" href="nightslayer-rating/">Arena rating addon</a>
+      <a class="nav-link" href="#install">Install guide</a>
+    </div>
   </header>
 
   <main id="top">
@@ -59,17 +61,17 @@
         <h2 id="builder-title">Build your setup</h2>
         <form id="setup-form" novalidate>
           <label for="account">Account folder name <span aria-hidden="true">*</span></label>
-          <input id="account" name="account" autocomplete="off" placeholder="e.g. WOWACCOUNT1" required />
+          <input id="account" name="account" autocomplete="off" maxlength="64" placeholder="e.g. WOWACCOUNT1" required />
           <p class="hint">Find this inside <code>WTF\Account</code></p>
 
           <div class="field-row">
             <div>
               <label for="server">Server <span aria-hidden="true">*</span></label>
-              <input id="server" name="server" autocomplete="off" value="Nightslayer" placeholder="e.g. Nightslayer" required />
+              <input id="server" name="server" autocomplete="off" maxlength="64" value="Nightslayer" placeholder="e.g. Nightslayer" required />
             </div>
             <div>
               <label for="character">Character <span aria-hidden="true">*</span></label>
-              <input id="character" name="character" autocomplete="off" placeholder="e.g. Thrall" required />
+              <input id="character" name="character" autocomplete="off" maxlength="64" placeholder="e.g. Thrall" required />
             </div>
           </div>
 
@@ -109,7 +111,7 @@
   <script src="template-chunk-4.js"></script>
   <script src="template-chunk-5.js"></script>
   <script src="wowup-data.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="vendor/jszip-3.10.1.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

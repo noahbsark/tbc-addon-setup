@@ -7,26 +7,24 @@ local SUPPORTED_REALMS = {
 }
 local MAX_REQUESTS = 1500
 local PRIORITY_OFFSET = 2000000000
+local REQUEST_RETENTION_SECONDS = 30 * 24 * 60 * 60
 local BRACKETS = { 2, 3, 5 }
 local HASH_MODULI = { 65521, 65519, 65497, 65479 }
 local HASH_BASES = { 131, 137, 139, 149 }
+local SHARED_CURRENT_INDEX = { [2] = 1, [3] = 2, [5] = 3 }
+local SHARED_BEST_INDEX = { [2] = 4, [3] = 5, [5] = 6 }
 
--- IronForge uses the familiar WoW quality palette for arena title bands.
-local RATING_TIERS = {
-    { key = "rank", label = "Rank One", hex = "ff8000" },
-    { key = "gladiator", label = "Gladiator", hex = "a335ee" },
-    { key = "duelist", label = "Duelist", hex = "0070dd" },
-    { key = "rival", label = "Rival", hex = "1eff00" },
-    { key = "challenger", label = "Challenger", hex = "ffffff" },
+-- These are neutral visual bands, not official arena titles. Official titles
+-- depend on ladder rank at the end of a season and cannot be inferred from a
+-- historical rating number alone.
+local RATING_BANDS = {
+    { minimum = 2400, label = "Elite", hex = "ff8000" },
+    { minimum = 2100, label = "Excellent", hex = "a335ee" },
+    { minimum = 1800, label = "Strong", hex = "0070dd" },
+    { minimum = 1500, label = "Competitive", hex = "1eff00" },
+    { minimum = 1, label = "Rated", hex = "ffffff" },
 }
-local UNRANKED_TIER = { key = "unranked", label = "Unranked", hex = "aaaaaa" }
-local NO_CUTOFF_TIER = { key = "unknown", label = "Rating", hex = "ffffff" }
-local DEFAULT_CUTOFF_SEASON = 3
-local DEFAULT_CUTOFFS = {
-    [2] = { rank = 2020, gladiator = 1876, duelist = 1781, rival = 1657, challenger = 1503 },
-    [3] = { rank = 1902, gladiator = 1754, duelist = 1714, rival = 1636, challenger = 1505 },
-    [5] = { rank = 2180, gladiator = 1987, duelist = 1842, rival = 1683, challenger = 1510 },
-}
+local INACTIVE_BAND = { label = "Inactive", hex = "aaaaaa" }
 
 local data = NightslayerRatingData or {
     meta = { realm = DEFAULT_REALM, region = "US", season = 0, generated = 0 },
@@ -135,12 +133,31 @@ local function RequestCount()
     return count
 end
 
+local function RequestTimestamp(value)
+    local stamp = tonumber(value) or 0
+    local now = time()
+    if stamp > now + (PRIORITY_OFFSET / 2) then
+        stamp = stamp - PRIORITY_OFFSET
+    end
+    return stamp
+end
+
+local function CleanupRequests()
+    local cutoff = time() - REQUEST_RETENTION_SECONDS
+    for key, value in pairs(NightslayerRatingRequests) do
+        local stamp = RequestTimestamp(value)
+        if type(key) ~= "string" or stamp <= 0 or stamp < cutoff then
+            NightslayerRatingRequests[key] = nil
+        end
+    end
+end
+
 local function RemoveOldestRequest()
     local oldestKey
     local oldestValue
 
     for key, value in pairs(NightslayerRatingRequests) do
-        value = tonumber(value) or 0
+        value = RequestTimestamp(value)
         if not oldestValue or value < oldestValue then
             oldestKey = key
             oldestValue = value
@@ -333,6 +350,36 @@ local function LookupRecord(name, realm)
     return sharedRecord or localRecord
 end
 
+local function CurrentRating(record, bracket)
+    if type(record) ~= "table" then
+        return nil
+    end
+    if type(record.current) == "table" then
+        return record.current[bracket] or record.current[tostring(bracket)]
+    end
+    local index = SHARED_CURRENT_INDEX[bracket]
+    return index and record[index] or nil
+end
+
+local function BestRating(record, bracket)
+    if type(record) ~= "table" then
+        return nil
+    end
+    if type(record.best) == "table" then
+        return record.best[bracket] or record.best[tostring(bracket)]
+    end
+    local index = SHARED_BEST_INDEX[bracket]
+    return index and record[index] or nil
+end
+
+local function ExactRating(record)
+    return type(record) == "table" and record.exact == true
+end
+
+local function AutomaticExactLookupAvailable()
+    return data.meta and data.meta.profileLookup == true
+end
+
 local function RatingText(value)
     value = tonumber(value)
     if not value or value <= 0 then
@@ -341,56 +388,32 @@ local function RatingText(value)
     return tostring(math.floor(value + 0.5))
 end
 
-local function GetCutoffs(bracket)
-    local cutoffSeason = tonumber(data.cutoffSeason)
-    local currentSeason = data.meta and tonumber(data.meta.season)
-    local cutoffs = data.cutoffs and data.cutoffs[bracket]
-    if cutoffSeason == currentSeason and type(cutoffs) == "table" then
-        return cutoffs
-    end
-    if currentSeason == DEFAULT_CUTOFF_SEASON then
-        return DEFAULT_CUTOFFS[bracket]
-    end
-    return nil
-end
-
-local function GetRatingTier(bracket, value)
+local function GetRatingBand(value)
     local rating = tonumber(value) or 0
     if rating <= 0 then
-        return UNRANKED_TIER
+        return INACTIVE_BAND
     end
 
-    local cutoffs = GetCutoffs(bracket)
-    if type(cutoffs) ~= "table" then
-        return NO_CUTOFF_TIER
-    end
-
-    for _, tier in ipairs(RATING_TIERS) do
-        local cutoff = tonumber(cutoffs[tier.key]) or 0
-        if cutoff > 0 and rating >= cutoff then
-            return tier
+    for _, band in ipairs(RATING_BANDS) do
+        if rating >= band.minimum then
+            return band
         end
     end
 
-    return UNRANKED_TIER
+    return INACTIVE_BAND
 end
 
-local function ColorText(tier, text)
-    return "|cff" .. tier.hex .. tostring(text) .. "|r"
+local function ColorText(band, text)
+    return "|cff" .. band.hex .. tostring(text) .. "|r"
 end
 
-local function ColoredRating(bracket, value)
-    return ColorText(GetRatingTier(bracket, value), RatingText(value))
+local function ColoredRating(value)
+    return ColorText(GetRatingBand(value), RatingText(value))
 end
 
-local function RatingBandLabel(bracket, current, best)
-    local rating = tonumber(current) or 0
-    if rating <= 0 then
-        rating = tonumber(best) or 0
-    end
-
-    local tier = GetRatingTier(bracket, rating)
-    return ColorText(tier, tier.label)
+local function RatingBandLabel(current)
+    local band = GetRatingBand(current)
+    return ColorText(band, band.label)
 end
 
 local function ShowWhisperRating(fullName)
@@ -420,23 +443,27 @@ local function ShowWhisperRating(fullName)
     local prefix = "|cffffd200[NSR]|r " .. displayName .. ": "
     local record = LookupRecord(name, canonicalRealm)
     if not record then
-        DEFAULT_CHAT_FRAME:AddMessage(prefix .. "rating not cached yet; lookup queued automatically")
+        if AutomaticExactLookupAvailable() then
+            DEFAULT_CHAT_FRAME:AddMessage(prefix .. "rating not cached yet; exact lookup queued")
+        else
+            DEFAULT_CHAT_FRAME:AddMessage(prefix .. "not in the packaged leaderboard cache")
+        end
         return
     end
 
     local parts = {}
-    local exact = record.exact == true
+    local exact = ExactRating(record)
     for _, bracket in ipairs(BRACKETS) do
-        local current = record.current and record.current[bracket]
-        local best = record.best and record.best[bracket]
+        local current = CurrentRating(record, bracket)
+        local best = BestRating(record, bracket)
         if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
             parts[#parts + 1] = string.format(
                 "%dv%d %s: %s current / %s %s%s",
                 bracket,
                 bracket,
-                RatingBandLabel(bracket, current, best),
-                ColoredRating(bracket, current),
-                ColoredRating(bracket, best),
+                RatingBandLabel(current),
+                ColoredRating(current),
+                ColoredRating(best),
                 exact and "high" or "best cached",
                 exact and "" or "*"
             )
@@ -475,17 +502,21 @@ local function AddRatingLines(tooltip, fullName, resultID)
 
     if not record then
         tooltip:AddLine("Current rating not cached yet", 0.75, 0.75, 0.75)
-        tooltip:AddLine("Lookup queued automatically", 0.35, 0.75, 1.00)
+        if AutomaticExactLookupAvailable() then
+            tooltip:AddLine("Exact lookup queued automatically", 0.35, 0.75, 1.00)
+        else
+            tooltip:AddLine("Not in the packaged leaderboard cache", 0.55, 0.55, 0.55)
+        end
         tooltip:Show()
         return
     end
 
-    local exact = record.exact == true
+    local exact = ExactRating(record)
     local foundRating = false
 
     for _, bracket in ipairs(BRACKETS) do
-        local current = record.current and record.current[bracket]
-        local best = record.best and record.best[bracket]
+        local current = CurrentRating(record, bracket)
+        local best = BestRating(record, bracket)
 
         if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
             foundRating = true
@@ -495,13 +526,13 @@ local function AddRatingLines(tooltip, fullName, resultID)
                 "%dv%d  %s",
                 bracket,
                 bracket,
-                RatingBandLabel(bracket, current, best)
+                RatingBandLabel(current)
             )
             local right = string.format(
                 "Current %s   %s%s%s",
-                ColoredRating(bracket, current),
+                ColoredRating(current),
                 bestLabel,
-                ColoredRating(bracket, best),
+                ColoredRating(best),
                 suffix
             )
             tooltip:AddDoubleLine(left, right, 0.35, 0.75, 1.00, 0.80, 0.80, 0.80)
@@ -511,7 +542,11 @@ local function AddRatingLines(tooltip, fullName, resultID)
     if not foundRating then
         tooltip:AddLine("No tracked arena rating", 0.75, 0.75, 0.75)
     elseif not exact then
-        tooltip:AddLine("* Exact lifetime high is queued", 0.55, 0.55, 0.55)
+        if AutomaticExactLookupAvailable() then
+            tooltip:AddLine("* Exact lifetime high is queued", 0.55, 0.55, 0.55)
+        else
+            tooltip:AddLine("* Highest rating seen in tracked leaderboards", 0.55, 0.55, 0.55)
+        end
     end
 
     local generated = data.meta and tonumber(data.meta.generated)
@@ -540,6 +575,19 @@ local function HideVanillaRatingLines(tooltip)
         line:Hide()
         line:ClearAllPoints()
     end
+
+    if tooltip.NightslayerRatingFinalHeight and
+        math.abs(tooltip:GetHeight() - tooltip.NightslayerRatingFinalHeight) < 1 then
+        tooltip:SetHeight(tooltip.NightslayerRatingBaseHeight)
+    end
+    if tooltip.NightslayerRatingFinalWidth and
+        math.abs(tooltip:GetWidth() - tooltip.NightslayerRatingFinalWidth) < 1 then
+        tooltip:SetWidth(tooltip.NightslayerRatingBaseWidth)
+    end
+    tooltip.NightslayerRatingBaseHeight = nil
+    tooltip.NightslayerRatingBaseWidth = nil
+    tooltip.NightslayerRatingFinalHeight = nil
+    tooltip.NightslayerRatingFinalWidth = nil
 end
 
 local function GetVanillaRatingLine(tooltip, index)
@@ -581,14 +629,18 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
 
     if not record then
         displayLines[#displayLines + 1] = { "Current rating not cached yet", 0.75, 0.75, 0.75 }
-        displayLines[#displayLines + 1] = { "Lookup queued automatically", 0.35, 0.75, 1.00 }
+        if AutomaticExactLookupAvailable() then
+            displayLines[#displayLines + 1] = { "Exact lookup queued automatically", 0.35, 0.75, 1.00 }
+        else
+            displayLines[#displayLines + 1] = { "Not in the packaged leaderboard cache", 0.55, 0.55, 0.55 }
+        end
     else
-        local exact = record.exact == true
+        local exact = ExactRating(record)
         local foundRating = false
 
         for _, bracket in ipairs(BRACKETS) do
-            local current = record.current and record.current[bracket]
-            local best = record.best and record.best[bracket]
+            local current = CurrentRating(record, bracket)
+            local best = BestRating(record, bracket)
 
             if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
                 foundRating = true
@@ -599,10 +651,10 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
                         "|cff59bfff%dv%d|r  %s   Current %s   %s %s%s",
                         bracket,
                         bracket,
-                        RatingBandLabel(bracket, current, best),
-                        ColoredRating(bracket, current),
+                        RatingBandLabel(current),
+                        ColoredRating(current),
                         bestLabel,
-                        ColoredRating(bracket, best),
+                        ColoredRating(best),
                         suffix
                     ),
                     1.00,
@@ -615,7 +667,14 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
         if not foundRating then
             displayLines[#displayLines + 1] = { "No tracked arena rating", 0.75, 0.75, 0.75 }
         elseif not exact then
-            displayLines[#displayLines + 1] = { "* Exact lifetime high is queued", 0.55, 0.55, 0.55 }
+            displayLines[#displayLines + 1] = {
+                AutomaticExactLookupAvailable()
+                    and "* Exact lifetime high is queued"
+                    or "* Highest rating seen in tracked leaderboards",
+                0.55,
+                0.55,
+                0.55,
+            }
         end
     end
 
@@ -634,8 +693,14 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
         maxLineWidth = math.max(maxLineWidth, line:GetStringWidth())
     end
 
-    tooltip:SetWidth(math.max(baseWidth, maxLineWidth + 22))
-    tooltip:SetHeight(baseHeight + (#displayLines * lineHeight) + 5)
+    local finalWidth = math.max(baseWidth, maxLineWidth + 22)
+    local finalHeight = baseHeight + (#displayLines * lineHeight) + 5
+    tooltip.NightslayerRatingBaseHeight = baseHeight
+    tooltip.NightslayerRatingBaseWidth = baseWidth
+    tooltip.NightslayerRatingFinalHeight = finalHeight
+    tooltip.NightslayerRatingFinalWidth = finalWidth
+    tooltip:SetWidth(finalWidth)
+    tooltip:SetHeight(finalHeight)
     tooltip.NightslayerRatingResultID = resultID
 end
 
@@ -701,6 +766,7 @@ local function TrackSearchResults()
     end
 end
 
+CleanupRequests()
 RebuildIndex()
 
 GameTooltip:HookScript("OnTooltipCleared", function(tooltip)
@@ -778,7 +844,11 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         print("|cffffd200Nightslayer Rating:|r disabled")
     elseif command == "lookup" and rest ~= "" then
         if QueuePlayer(rest, true) then
-            print("|cffffd200Nightslayer Rating:|r queued " .. rest .. " for automatic lookup")
+            if AutomaticExactLookupAvailable() then
+                print("|cffffd200Nightslayer Rating:|r queued " .. rest .. " for automatic exact lookup")
+            else
+                print("|cffffd200Nightslayer Rating:|r saved " .. rest .. "; the Windows companion is required for exact lookup")
+            end
         else
             print("|cffffd200Nightslayer Rating:|r use NAME or NAME-Nightslayer/Dreamscythe")
         end
@@ -806,13 +876,13 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         local players = realmCounts.Nightslayer + realmCounts.Dreamscythe
 
         print(string.format(
-            "|cffffd200Nightslayer Rating:|r %d cached players (%d Nightslayer, %d Dreamscythe), %d exact lifetime highs, season %s, cutoff colors %s",
+            "|cffffd200Nightslayer Rating:|r %d cached players (%d Nightslayer, %d Dreamscythe), %d exact lifetime highs, season %s, exact lookup %s",
             players,
             realmCounts.Nightslayer,
             realmCounts.Dreamscythe,
             exact,
             tostring((data.meta and data.meta.season) or "?"),
-            GetCutoffs(2) and "loaded" or "unavailable"
+            AutomaticExactLookupAvailable() and "automatic" or "requires Windows companion"
         ))
         print("Commands: /nsr on, /nsr off, /nsr lookup NAME[-REALM]")
     end

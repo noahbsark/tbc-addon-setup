@@ -37,16 +37,6 @@ class FakeClient:
                     {"server": "OtherRealm", "name": "Ignored", "rating": 2500},
                 ],
             }
-        if path.startswith("anniversary/cutoffs/1/US/"):
-            return {
-                "cutoff": [
-                    [2000, "Vengeful Gladiator"],
-                    [1900, "Gladiator"],
-                    [1800, "Duelist"],
-                    [1700, "Rival"],
-                    [1500, "Challenger"],
-                ]
-            }
         if path == "anniversary/player/Dreamscythe/Exactname":
             return {
                 "info": {"name": "Exactname"},
@@ -74,7 +64,7 @@ class SharedCacheTests(unittest.TestCase):
         serialized = json.dumps(snapshot, ensure_ascii=False)
         self.assertNotIn("Twinname", serialized)
         self.assertNotIn("Ignored", serialized)
-        self.assertEqual(snapshot["version"], 4)
+        self.assertEqual(snapshot["version"], 5)
         self.assertEqual(snapshot["keyAlgorithm"], "nsr-h4-v1")
 
     def test_hash_vector_and_deterministic_gzip(self):
@@ -93,8 +83,6 @@ class SharedCacheTests(unittest.TestCase):
                 "season": 1,
                 "generated": 123,
                 "leaderboardUpdated": 120,
-                "cutoffSeason": 1,
-                "cutoffs": {"2": {}, "3": {}, "5": {}},
                 "counts": {},
             }
             MODULE.write_outputs(snapshot, output, meta, lua_output)
@@ -105,6 +93,17 @@ class SharedCacheTests(unittest.TestCase):
             self.assertIn("NightslayerRatingData", lua)
             self.assertIn('realms = { "Nightslayer", "Dreamscythe" }', lua)
             self.assertIn("sharedPlayers", lua)
+            self.assertIn("profileLookup = false", lua)
+
+    def test_lua_players_use_compact_six_rating_rows(self):
+        snapshot = MODULE.build_snapshot(FakeClient())
+        key = MODULE.lookup_hash("Nightslayer", "Twinname")
+        lua = MODULE.render_lua(snapshot)
+        self.assertIn(
+            f'["{key}"] = {{ 1502, 1503, 1505, 1502, 1503, 1505 }}',
+            lua,
+        )
+        self.assertNotIn("exact = false", lua)
 
     def test_hash_collision_fails_closed(self):
         with mock.patch.object(MODULE, "lookup_hash", return_value="0000000000000000"):

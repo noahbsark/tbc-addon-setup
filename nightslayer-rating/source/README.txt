@@ -1,17 +1,22 @@
-NIGHTSLAYER RATING 1.1.0
+NIGHTSLAYER RATING 1.2.0
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
 
-WHAT CHANGED IN 1.1.0
+WHAT CHANGED IN 1.2.0
 ---------------------
-- Added Dreamscythe support for cross-realm battleground encounters. Characters
-  are indexed by realm and name, so identically named players cannot collide.
-- Added a shared, read-only snapshot that is refreshed on GitHub every 30 minutes.
-  The Windows companion downloads it first, making installation and routine
-  updates much faster and reducing duplicate traffic to IronForge.
-- Kept exact lifetime-high lookups automatic and local. Hovered and whispered
-  characters are queued, then checked from IronForge after WoW saves the queue.
-- Added IronForge-style rating bands: gray below Challenger, white Challenger,
-  green Rival, blue Duelist, purple Gladiator, and orange Rank One.
+- Replaced inferred Rank One/Gladiator/etc. labels with neutral visual bands:
+  Rated, Competitive, Strong, Excellent, and Elite. Official arena titles are
+  based on end-of-season ladder rank and cannot be inferred from a peak rating.
+- An inactive bracket now says Inactive even when an older peak exists. Current
+  and peak numbers remain independently color coded for quick scanning.
+- Cut packaged rating data to a compact format, reducing addon load work and
+  memory use without changing the lookup result.
+- Hardened shared-cache downloads with strict compressed, decompressed, record,
+  and rating limits.
+- Reduced exact-profile traffic: only recently encountered characters are kept,
+  and successful exact profiles refresh no more than weekly.
+- Fixed repeated Vanilla Style tooltip growth and stale automatic-updater entries.
+- The addon-only build now clearly distinguishes its packaged leaderboard cache
+  from exact lifetime highs that require the Windows companion.
 
 If an earlier version is installed, close WoW, extract this release, and run
 Install.cmd again. Your existing exact-profile cache is migrated and preserved.
@@ -38,7 +43,7 @@ INSTALLATION (WINDOWS)
 
 The installer normally finds the _anniversary_ game folder itself. If WoW is in
 an unusual location, it asks you to select that folder once. It installs a quiet
-current-user updater that refreshes every 30 minutes and at Windows sign-in.
+current-user updater that refreshes every hour and at Windows sign-in.
 
 HOW AUTOMATIC DATA WORKS
 ------------------------
@@ -52,7 +57,7 @@ outside the game and writes Data.lua, which WoW reads at login or /reload.
 3. Names encountered in Group Finder, unit tooltips, battlegrounds, or whispers
    are saved in this addon's own SavedVariables queue.
 4. After WoW next saves that queue during logout, exit, or /reload, the companion
-   asks IronForge for exact lifetime highs for up to 20 queued profiles per run.
+   asks IronForge for exact lifetime highs for up to 10 recent profiles per run.
 5. New data appears at the next login or /reload. A running WoW client cannot
    hot-load an externally changed addon file.
 
@@ -61,9 +66,9 @@ to IronForge's bulk endpoints and continues working. A tooltip says "Best cached
 until an exact profile lookup has completed; it never labels an approximation as
 an exact lifetime high.
 
-Historical-high colors are compared with the current season's bracket cutoff for
-quick visual context. They are not a claim that the character earned that title
-in an earlier season.
+Colors are a fixed visual guide: gray inactive, white rated, green competitive
+(1500+), blue strong (1800+), purple excellent (2100+), and orange elite (2400+).
+These labels are intentionally not official arena titles or achievement claims.
 
 OPTIONAL COMMANDS
 -----------------

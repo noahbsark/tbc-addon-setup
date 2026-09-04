@@ -19,7 +19,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 DEFAULT_API_BASE = "https://ironforge.pro/api"
@@ -30,7 +30,7 @@ HASH_ALGORITHM = "nsr-h4-v1"
 HASH_MODULI = (65_521, 65_519, 65_497, 65_479)
 HASH_BASES = (131, 137, 139, 149)
 USER_AGENT = (
-    "NightslayerRating/1.1.0 shared-cache publisher "
+    "NightslayerRating/1.2.0 shared-cache publisher "
     "(+https://github.com/noahbsark/tbc-addon-setup)"
 )
 
@@ -90,33 +90,6 @@ class ApiClient:
                     raise
             time.sleep(delay)
         return None
-
-
-def parse_cutoffs(rows: Iterable[Any]) -> dict[str, int]:
-    result: dict[str, int] = {}
-    for row in rows or ():
-        if not isinstance(row, list) or len(row) < 2:
-            continue
-        try:
-            rating = int(row[0])
-        except (TypeError, ValueError):
-            continue
-        title = str(row[1])
-        if title == "Gladiator":
-            tier = "gladiator"
-        elif title == "Duelist":
-            tier = "duelist"
-        elif title == "Rival":
-            tier = "rival"
-        elif title == "Challenger":
-            tier = "challenger"
-        elif title.endswith("Gladiator") or title == "Rank One":
-            tier = "rank"
-        else:
-            continue
-        if rating > 0:
-            result[tier] = rating
-    return result
 
 
 def new_player() -> dict[str, dict[str, int]]:
@@ -196,26 +169,15 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
                     int(player["bestSeen"].get(bracket_key, 0)), rating
                 )
 
-    cutoffs: dict[str, dict[str, int]] = {}
-    for bracket in BRACKETS:
-        payload = client.get_json(f"anniversary/cutoffs/{current_season}/US/{bracket}/")
-        rows = payload.get("cutoff", []) if isinstance(payload, dict) else []
-        cutoff_map = parse_cutoffs(rows)
-        if len(cutoff_map) < 5:
-            raise RuntimeError(f"incomplete {bracket}v{bracket} cutoff data")
-        cutoffs[str(bracket)] = cutoff_map
-
     ordered_players = {key: players[key] for key in sorted(players)}
     counts = {realm: len(keys) for realm, keys in seen_by_realm.items()}
     return {
-        "version": 4,
+        "version": 5,
         "keyAlgorithm": HASH_ALGORITHM,
         "generated": generated,
         "source": "ironforge.pro",
         "region": "US",
         "season": current_season,
-        "cutoffSeason": current_season,
-        "cutoffs": cutoffs,
         "realms": list(REALMS.values()),
         "leaderboardUpdated": leaderboard_updated,
         "counts": counts,
@@ -232,14 +194,13 @@ def lua_rating_map(values: dict[str, int]) -> str:
     return "{ " + ", ".join(parts) + " }"
 
 
-def lua_cutoff_map(values: dict[str, int]) -> str:
-    tiers = ("rank", "gladiator", "duelist", "rival", "challenger")
-    parts = [
-        f"{tier} = {int(values[tier])}"
-        for tier in tiers
-        if int(values.get(tier, 0)) > 0
-    ]
-    return "{ " + ", ".join(parts) + " }"
+def lua_compact_player(player: dict[str, dict[str, int]]) -> str:
+    """Render current 2/3/5 then best 2/3/5 as one compact Lua array."""
+    current = player.get("current", {})
+    best = player.get("bestSeen", {})
+    ratings = [int(current.get(str(bracket), 0)) for bracket in BRACKETS]
+    ratings.extend(int(best.get(str(bracket), 0)) for bracket in BRACKETS)
+    return "{ " + ", ".join(str(max(0, rating)) for rating in ratings) + " }"
 
 
 def render_lua(snapshot: dict[str, Any]) -> str:
@@ -255,31 +216,17 @@ def render_lua(snapshot: dict[str, Any]) -> str:
         f"        generated = {int(snapshot['generated'])},",
         f"        leaderboardUpdated = {int(snapshot['leaderboardUpdated'])},",
         f"        sharedGenerated = {int(snapshot['generated'])},",
+        "        profileLookup = false,",
         "        counts = {",
         f"            Nightslayer = {int(counts.get('Nightslayer', 0))},",
         f"            Dreamscythe = {int(counts.get('Dreamscythe', 0))},",
         "        },",
         '        source = "ironforge.pro via pseudonymous shared snapshot",',
         "    },",
-        f"    cutoffSeason = {int(snapshot['cutoffSeason'])},",
-        "    cutoffs = {",
+        "    sharedPlayers = {",
     ]
-    cutoffs = snapshot.get("cutoffs", {})
-    for bracket in BRACKETS:
-        lines.append(
-            f"        [{bracket}] = {lua_cutoff_map(cutoffs.get(str(bracket), {}))},"
-        )
-    lines.extend(("    },", "    sharedPlayers = {"))
     for key, player in snapshot.get("players", {}).items():
-        lines.extend(
-            (
-                f'        ["{key}"] = {{',
-                f"            current = {lua_rating_map(player.get('current', {}))},",
-                f"            best = {lua_rating_map(player.get('bestSeen', {}))},",
-                "            exact = false,",
-                "        },",
-            )
-        )
+        lines.append(f'        ["{key}"] = {lua_compact_player(player)},')
     lines.extend(("    },", "    players = {},", "}", ""))
     return "\n".join(lines)
 

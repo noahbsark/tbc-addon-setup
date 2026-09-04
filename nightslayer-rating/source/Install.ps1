@@ -96,20 +96,29 @@ function Register-AutomaticUpdater {
         Import-Module ScheduledTasks -ErrorAction Stop
         $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
         $action = New-ScheduledTaskAction -Execute $wscript -Argument ('"{0}"' -f $VbsPath)
-        $repeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(30) -RepetitionInterval (New-TimeSpan -Minutes 30)
+        $repeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(1) -RepetitionInterval (New-TimeSpan -Hours 1)
         $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
         $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
         $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($repeatTrigger, $logonTrigger) -Settings $settings -Description 'Refreshes the Nightslayer and Dreamscythe arena-rating cache.' -Force | Out-Null
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        if (Test-Path -LiteralPath $runKey) {
+            Remove-ItemProperty -LiteralPath $runKey -Name $RunValueName -ErrorAction SilentlyContinue
+        }
         $registered = $true
     } catch {
+        try {
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        } catch {
+            # A partially configured task is harmless and may not exist.
+        }
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
         if (-not (Test-Path -LiteralPath $runKey)) {
             New-Item -Path $runKey -Force | Out-Null
         }
         $runCommand = 'wscript.exe "{0}"' -f $VbsPath
         Set-ItemProperty -LiteralPath $runKey -Name $RunValueName -Value $runCommand -Force
-        Write-Warning 'Windows blocked the 30-minute scheduled task. Updates will still run automatically when you sign in to Windows.'
+        Write-Warning 'Windows blocked the hourly scheduled task. Updates will still run automatically when you sign in to Windows.'
     }
 
     return $registered
@@ -168,7 +177,7 @@ $scheduled = Register-AutomaticUpdater -VbsPath (Join-Path $updaterTarget 'RunUp
 Write-Host ''
 Write-Host 'Installation complete.' -ForegroundColor Green
 if ($scheduled) {
-    Write-Host 'Ratings will refresh automatically every 30 minutes and at Windows sign-in.'
+    Write-Host 'Ratings will refresh automatically every hour and at Windows sign-in.'
 } else {
     Write-Host 'Ratings will refresh automatically at Windows sign-in.'
 }

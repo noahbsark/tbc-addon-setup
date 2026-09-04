@@ -23,8 +23,18 @@ inputs.forEach(input => input.addEventListener('input', () => {
 
 function validate(value, label) {
   if (!value) return `${label} is required.`;
+  if (value.length > 64) return `${label} must be 64 characters or fewer.`;
   if (forbidden.test(value) || /[. ]$/.test(value) || reserved.test(value)) return `${label} contains characters Windows can’t use in a folder name.`;
   return '';
+}
+
+function safeArchivePath(path) {
+  const normalized = path.replace(/\/+$/, '');
+  const parts = normalized.split('/');
+  return normalized.startsWith('WTF/Account/') &&
+    !path.startsWith('/') &&
+    !path.includes('\\') &&
+    !parts.some(part => !part || part === '.' || part === '..' || part.includes(':'));
 }
 
 function fullPath() { return root; }
@@ -77,6 +87,7 @@ form.addEventListener('submit', async event => {
     const textFile = /\.(txt|old|wtf|md5|lua|bak)$/i;
     for (const [path, entry] of Object.entries(source.files)) {
       const renamed = path.replace(/ACCOUNTNAME|SERVERNAME|CHARACTERNAME/g, key => replacements[key]);
+      if (!safeArchivePath(renamed)) throw new Error('Template contained an unsafe path');
       if (entry.dir) {
         result.folder(renamed);
       } else if (textFile.test(path)) {

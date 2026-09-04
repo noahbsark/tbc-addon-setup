@@ -1,0 +1,41 @@
+name: Test rating addon
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/test-rating-addon.yml"
+      - "nightslayer-rating/source/**"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-integration:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Parse and run updater against the public snapshot
+        shell: powershell
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP '_anniversary_'
+          $addon = Join-Path $root 'Interface\AddOns\NightslayerRating'
+          New-Item -ItemType Directory -Path $addon -Force | Out-Null
+          Copy-Item 'nightslayer-rating\source\Addon\NightslayerRating\*' $addon -Recurse -Force
+
+          & 'nightslayer-rating\source\Updater\NightslayerRatingUpdater.ps1' -WowPath $root -Quiet
+          if ($LASTEXITCODE -ne 0) {
+            throw "Updater integration test failed with exit code $LASTEXITCODE"
+          }
+
+          $data = Get-Content (Join-Path $addon 'Data.lua') -Raw
+          if ($data -notmatch 'profileLookup = true') {
+            throw 'Generated Data.lua does not enable exact-profile lookup.'
+          }
+          if ($data -notmatch '\["[0-9a-f]{16}"\] = \{ \d+, \d+, \d+, \d+, \d+, \d+ \}') {
+            throw 'Generated Data.lua does not contain compact shared records.'
+          }
