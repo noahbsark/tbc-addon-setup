@@ -100,7 +100,7 @@ function Register-AutomaticUpdater {
         $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
         $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
         $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($repeatTrigger, $logonTrigger) -Settings $settings -Description 'Refreshes the Nightslayer Rating addon cache from IronForge.' -Force | Out-Null
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($repeatTrigger, $logonTrigger) -Settings $settings -Description 'Refreshes the Nightslayer and Dreamscythe arena-rating cache.' -Force | Out-Null
         $registered = $true
     } catch {
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -148,18 +148,19 @@ foreach ($name in @('NightslayerRatingUpdater.ps1', 'RunUpdater.vbs')) {
 $config = @{
     WowPath = $resolvedWowPath
     Realm = 'Nightslayer'
+    Realms = @('Nightslayer', 'Dreamscythe')
     Region = 'US'
 } | ConvertTo-Json
 [IO.File]::WriteAllText((Join-Path $updaterTarget 'config.json'), $config, $Utf8NoBom)
 
 Write-Host ('Installed addon to: ' + $addonTarget) -ForegroundColor Green
-Write-Host 'Downloading the first rating cache. This can take a few minutes...'
+Write-Host 'Downloading the shared Nightslayer and Dreamscythe rating cache...'
 
 $updaterScript = Join-Path $updaterTarget 'NightslayerRatingUpdater.ps1'
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updaterScript -WowPath $resolvedWowPath
 $initialUpdateWorked = $LASTEXITCODE -eq 0
 if (-not $initialUpdateWorked) {
-    Write-Warning 'The initial download failed. The automatic updater will retry; the included Reefey example remains available.'
+    Write-Warning 'The initial download failed. The automatic updater will retry; the included two-realm cache remains available.'
 }
 
 $scheduled = Register-AutomaticUpdater -VbsPath (Join-Path $updaterTarget 'RunUpdater.vbs')

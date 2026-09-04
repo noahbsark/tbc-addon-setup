@@ -145,6 +145,7 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
     seasons = discover_seasons(client, payloads)
     current_season = seasons[-1]
     players: dict[str, dict[str, dict[str, int]]] = {}
+    hash_owners: dict[str, str] = {}
     seen_by_realm: dict[str, set[str]] = {realm: set() for realm in REALMS.values()}
     leaderboard_updated = 0
 
@@ -178,11 +179,19 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
                     continue
 
                 key = lookup_hash(realm, name)
+                identity = f"{normalize_realm(realm)}|{ascii_lower(name)}"
+                previous_owner = hash_owners.setdefault(key, identity)
+                if previous_owner != identity:
+                    raise RuntimeError(
+                        "lookup hash collision detected; update the hash algorithm"
+                    )
                 seen_by_realm[realm].add(key)
                 player = players.setdefault(key, new_player())
                 bracket_key = str(bracket)
                 if season == current_season:
-                    player["current"][bracket_key] = rating
+                    player["current"][bracket_key] = max(
+                        int(player["current"].get(bracket_key, 0)), rating
+                    )
                 player["bestSeen"][bracket_key] = max(
                     int(player["bestSeen"].get(bracket_key, 0)), rating
                 )

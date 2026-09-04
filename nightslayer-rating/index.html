@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Free TBC Anniversary addon for Nightslayer that adds current and highest-ever arena ratings to Group Finder player tooltips.">
+  <meta name="description" content="Free TBC Anniversary addon with color-coded current and highest-recorded arena ratings for Nightslayer and Dreamscythe in Group Finder, player tooltips, and whispers.">
   <meta name="theme-color" content="#101815">
   <meta property="og:title" content="Nightslayer Rating — TBC Anniversary Addon">
-  <meta property="og:description" content="Hover a Group Finder name to see current and highest-ever 2v2, 3v3, and 5v5 ratings.">
+  <meta property="og:description" content="See color-coded current and highest-recorded 2v2, 3v3, and 5v5 ratings for Nightslayer and Dreamscythe in game.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/">
   <meta property="og:image" content="https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/group-finder.png">
@@ -26,6 +26,12 @@
       --gold: #e7bb61;
       --blue: #65bdff;
       --green: #81d79d;
+      --rank-one: #ff8000;
+      --gladiator: #a335ee;
+      --duelist: #0070dd;
+      --rival: #1eff00;
+      --challenger: #fff;
+      --unranked: #aaa;
       --shadow: 0 26px 80px rgba(0, 0, 0, .38);
     }
 
@@ -157,7 +163,14 @@
     .bracket { color: var(--blue); font-weight: 800; }
     .label { color: var(--muted); font-size: 13px; }
     .numbers { font-variant-numeric: tabular-nums; font-size: 14px; }
-    .numbers strong { color: var(--green); }
+    .numbers b { font-weight: 800; }
+    .tier-rank-one { color: var(--rank-one); }
+    .tier-gladiator { color: var(--gladiator); }
+    .tier-duelist { color: var(--duelist); }
+    .tier-rival { color: var(--rival); }
+    .tier-challenger { color: var(--challenger); }
+    .tier-unranked { color: var(--unranked); }
+    .color-legend { display: flex; flex-wrap: wrap; gap: 5px 11px; margin-top: 12px; font-size: 11px; }
     .source { margin: 14px 0 0; color: #70817a; font-size: 11px; }
 
     .trust-strip {
@@ -269,30 +282,31 @@
   <main id="top">
     <div class="hero shell">
       <div>
-        <p class="eyebrow">TBC Anniversary · Nightslayer US</p>
+        <p class="eyebrow">TBC Anniversary · Nightslayer + Dreamscythe US</p>
         <h1>Know the rating <em>before you invite.</em></h1>
-        <p class="lede">See a player's current and highest recorded 2v2, 3v3, and 5v5 arena ratings in Group Finder, on world hover, or when they whisper you.</p>
+        <p class="lede">See a player's color-coded current and highest recorded 2v2, 3v3, and 5v5 arena ratings in Group Finder, on world hover, in battlegrounds, or when they whisper you.</p>
         <div class="actions">
-          <a class="button" href="downloads/NightslayerRating-1.0.1-Windows.zip" download>Download for Windows <span aria-hidden="true">↓</span></a>
+          <a class="button" href="downloads/NightslayerRating-1.1.0-Windows.zip" download>Download for Windows <span aria-hidden="true">↓</span></a>
           <a class="button secondary" href="#downloads">Other download</a>
         </div>
-        <p class="fine">Version 1.0.1 · Free · Windows 10/11 · Fixes the Vanilla Style tooltip and updater error</p>
+        <p class="fine">Version 1.1.0 · Free · Windows 10/11 · Two realms · Automatic updates</p>
       </div>
 
       <aside class="tooltip-demo" aria-label="Example rating tooltip for Reefey">
         <div class="player">Reefey</div>
         <div class="realm">Nightslayer · Arena rating</div>
         <div class="rule"></div>
-        <div class="rating-row"><span class="bracket">2v2</span><span class="label">Current / High</span><span class="numbers">1,962 / <strong>2,540</strong></span></div>
-        <div class="rating-row"><span class="bracket">3v3</span><span class="label">Current / High</span><span class="numbers">1,702 / <strong>2,528</strong></span></div>
-        <div class="rating-row"><span class="bracket">5v5</span><span class="label">Current / High</span><span class="numbers">2,300 / <strong>2,408</strong></span></div>
-        <p class="source">Data source: ironforge.pro · Example record included</p>
+        <div class="rating-row"><span class="bracket">2v2</span><span class="label tier-gladiator">Gladiator</span><span class="numbers"><b class="tier-gladiator">1,962</b> / <b class="tier-rank-one">2,540</b></span></div>
+        <div class="rating-row"><span class="bracket">3v3</span><span class="label tier-rival">Rival</span><span class="numbers"><b class="tier-rival">1,702</b> / <b class="tier-rank-one">2,528</b></span></div>
+        <div class="rating-row"><span class="bracket">5v5</span><span class="label tier-rank-one">Rank One</span><span class="numbers"><b class="tier-rank-one">2,300</b> / <b class="tier-rank-one">2,408</b></span></div>
+        <div class="color-legend" aria-label="Rating color legend"><span class="tier-challenger">Challenger</span><span class="tier-rival">Rival</span><span class="tier-duelist">Duelist</span><span class="tier-gladiator">Gladiator</span><span class="tier-rank-one">Rank One</span></div>
+        <p class="source">Current / high · Live bracket-specific IronForge cutoffs</p>
       </aside>
     </div>
 
     <div class="trust-strip shell" aria-label="Addon facts">
-      <div><strong>8,077</strong><span>Nightslayer players pre-cached</span></div>
-      <div><strong>3</strong><span>Arena brackets in each tooltip</span></div>
+      <div><strong>20,274</strong><span>Players in the current shared snapshot</span></div>
+      <div><strong>2</strong><span>Realms, kept separate by every lookup</span></div>
       <div><strong>30 min</strong><span>Automatic refresh schedule</span></div>
       <div><strong>0</strong><span>Logins, keys, or game automation</span></div>
     </div>
@@ -310,10 +324,10 @@
         </figure>
         <div class="feature-card">
           <h3>Automatic after one setup</h3>
-          <div class="feature"><b>1</b><div><strong>Current ratings</strong><p>The updater refreshes the Nightslayer leaderboard cache in the background.</p></div></div>
-          <div class="feature"><b>2</b><div><strong>Exact lifetime highs</strong><p>Names you encounter are queued for a focused IronForge profile lookup after WoW saves on logout.</p></div></div>
-          <div class="feature"><b>3</b><div><strong>Honest fallback</strong><p>Until an exact lookup finishes, seasonal data is clearly labeled “Best cached*” instead of being presented as exact.</p></div></div>
-          <div class="feature"><b>4</b><div><strong>Hover and whisper support</strong><p>Ratings appear on world-player hovers, while incoming and outgoing whispers get a local chat summary once per character.</p></div></div>
+          <div class="feature"><b>1</b><div><strong>Instant skill bands</strong><p>Each bracket is labeled and color-coded from Challenger through Rank One using IronForge's live US cutoffs.</p></div></div>
+          <div class="feature"><b>2</b><div><strong>Fast shared coverage</strong><p>A central read-only snapshot refreshes every 30 minutes, so most names have useful ratings before your computer makes any profile lookup.</p></div></div>
+          <div class="feature"><b>3</b><div><strong>Exact lifetime highs</strong><p>Names you actually encounter are queued for a focused local IronForge profile lookup. Until it finishes, the tooltip honestly says “Best cached*.”</p></div></div>
+          <div class="feature"><b>4</b><div><strong>Realm-aware everywhere</strong><p>Group Finder, player hovers, battleground opponents, and incoming or outgoing whispers all work without mixing same-named characters across realms.</p></div></div>
         </div>
       </div>
     </section>
@@ -342,8 +356,8 @@
           <span class="tag">RECOMMENDED</span>
           <h3>Windows automatic bundle</h3>
           <p>Addon, installer, background updater, manual update shortcut, documentation, and uninstaller.</p>
-          <ul><li>Automatic rating refreshes</li><li>Exact highs for encountered names</li><li>One-click uninstall included</li></ul>
-          <a class="button" href="downloads/NightslayerRating-1.0.1-Windows.zip" download>Download v1.0.1 · 168 KB <span aria-hidden="true">↓</span></a>
+          <ul><li>Automatic rating and cutoff refreshes</li><li>Exact highs for encountered names</li><li>One-click uninstall included</li></ul>
+          <a class="button" href="downloads/NightslayerRating-1.1.0-Windows.zip" download>Download v1.1.0 · 404 KB <span aria-hidden="true">↓</span></a>
         </article>
 
         <article class="download-card">
@@ -351,7 +365,7 @@
           <h3>Addon only</h3>
           <p>Just the <code>NightslayerRating</code> addon folder and the rating snapshot packaged with this release.</p>
           <ul><li>Manual Interface/AddOns install</li><li>No Windows scheduled task</li><li>Ratings will not refresh automatically</li></ul>
-          <a class="button secondary" href="downloads/NightslayerRating-1.0.1-AddonOnly.zip" download>Download addon only · 155 KB <span aria-hidden="true">↓</span></a>
+          <a class="button secondary" href="downloads/NightslayerRating-1.1.0-AddonOnly.zip" download>Download addon only · 388 KB <span aria-hidden="true">↓</span></a>
         </article>
       </div>
     </section>
@@ -364,6 +378,7 @@
           <p>This is an unsigned community package, so Windows may show a security warning. You can inspect every script before running it and remove everything with <code>Uninstall.cmd</code>.</p>
           <div class="source-links">
             <a href="https://github.com/noahbsark/tbc-addon-setup/tree/main/nightslayer-rating/source">Browse all source files</a>
+            <a href="https://github.com/noahbsark/tbc-addon-setup/releases/tag/ratings-data">Shared data status</a>
             <a href="checksums.txt">View SHA-256 checksums</a>
             <a href="https://ironforge.pro/anniversary/player/Nightslayer/Reefey/">Example IronForge profile</a>
           </div>
@@ -373,10 +388,11 @@
             <li>No account credentials or API keys.</li>
             <li>No reading game memory, controlling WoW, or automating gameplay.</li>
             <li>The updater reads only this addon's SavedVariables to find public character names encountered in Group Finder, player hovers, or whispers.</li>
+            <li>The shared cache uses realm-aware lookup hashes and publishes no raw character names. Exact profile names and results stay on each user's PC.</li>
             <li>Local cache and logs stay in <code>%LOCALAPPDATA%\NightslayerRating</code>.</li>
             <li>IronForge can lag the live game, so the tooltip reflects the newest data IronForge publishes.</li>
           </ul>
-          <p><strong>Windows bundle SHA-256</strong><br><code>7c6233ebec2a96928ac34eebce37df4701d8aae9edb85aa44960d8a013254ed4</code></p>
+          <p><strong>Windows bundle SHA-256</strong><br><code>7d283b87f642a6001ee434d48e325f2cf10c3830588fdbe4cbfa77942d872009</code></p>
         </div>
       </div>
     </section>
@@ -384,7 +400,7 @@
 
   <footer>
     <div class="footer-row shell">
-      <span>Nightslayer Rating v1.0.1 · Free community addon</span>
+      <span>Nightslayer Rating v1.1.0 · Free community addon</span>
       <span>Not affiliated with Blizzard Entertainment or IronForge</span>
     </div>
   </footer>

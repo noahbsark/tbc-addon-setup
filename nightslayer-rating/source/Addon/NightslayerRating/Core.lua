@@ -1,12 +1,36 @@
 local ADDON_NAME = ...
 
 local DEFAULT_REALM = "Nightslayer"
+local SUPPORTED_REALMS = {
+    nightslayer = "Nightslayer",
+    dreamscythe = "Dreamscythe",
+}
 local MAX_REQUESTS = 1500
 local PRIORITY_OFFSET = 2000000000
 local BRACKETS = { 2, 3, 5 }
+local HASH_MODULI = { 65521, 65519, 65497, 65479 }
+local HASH_BASES = { 131, 137, 139, 149 }
+
+-- IronForge uses the familiar WoW quality palette for arena title bands.
+local RATING_TIERS = {
+    { key = "rank", label = "Rank One", hex = "ff8000" },
+    { key = "gladiator", label = "Gladiator", hex = "a335ee" },
+    { key = "duelist", label = "Duelist", hex = "0070dd" },
+    { key = "rival", label = "Rival", hex = "1eff00" },
+    { key = "challenger", label = "Challenger", hex = "ffffff" },
+}
+local UNRANKED_TIER = { key = "unranked", label = "Unranked", hex = "aaaaaa" }
+local NO_CUTOFF_TIER = { key = "unknown", label = "Rating", hex = "ffffff" }
+local DEFAULT_CUTOFF_SEASON = 3
+local DEFAULT_CUTOFFS = {
+    [2] = { rank = 2020, gladiator = 1876, duelist = 1781, rival = 1657, challenger = 1503 },
+    [3] = { rank = 1902, gladiator = 1754, duelist = 1714, rival = 1636, challenger = 1505 },
+    [5] = { rank = 2180, gladiator = 1987, duelist = 1842, rival = 1683, challenger = 1510 },
+}
 
 local data = NightslayerRatingData or {
     meta = { realm = DEFAULT_REALM, region = "US", season = 0, generated = 0 },
+    sharedPlayers = {},
     players = {},
 }
 
@@ -20,12 +44,54 @@ local modernEntryHookInstalled = false
 local vanillaTooltipHookInstalled = false
 local whisperNotified = {}
 
-local function NormalizeRealm(realm)
-    if type(realm) ~= "string" then
+local function AsciiLower(value)
+    if type(value) ~= "string" then
         return ""
     end
 
-    return string.lower((realm:gsub("[%s%-']", "")))
+    local output = {}
+    for index = 1, #value do
+        local byte = string.byte(value, index)
+        if byte >= 65 and byte <= 90 then
+            byte = byte + 32
+        end
+        output[index] = string.char(byte)
+    end
+    return table.concat(output)
+end
+
+local function NormalizeRealm(realm)
+    return AsciiLower(realm):gsub("[%s%-']", "")
+end
+
+local function ResolveRealm(realm)
+    return SUPPORTED_REALMS[NormalizeRealm(realm or DEFAULT_REALM)]
+end
+
+local function PlayerKey(name, realm)
+    local canonicalRealm = ResolveRealm(realm)
+    if type(name) ~= "string" or name == "" or not canonicalRealm then
+        return nil
+    end
+
+    return NormalizeRealm(canonicalRealm) .. "|" .. AsciiLower(name)
+end
+
+local function SharedLookupKey(name, realm)
+    local canonicalRealm = ResolveRealm(realm)
+    if type(name) ~= "string" or name == "" or not canonicalRealm then
+        return nil
+    end
+
+    local input = NormalizeRealm(canonicalRealm) .. "|" .. AsciiLower(name)
+    local values = { 0, 0, 0, 0 }
+    for index = 1, #input do
+        local byte = string.byte(input, index)
+        for hashIndex = 1, 4 do
+            values[hashIndex] = ((values[hashIndex] * HASH_BASES[hashIndex]) + byte) % HASH_MODULI[hashIndex]
+        end
+    end
+    return string.format("%04x%04x%04x%04x", values[1], values[2], values[3], values[4])
 end
 
 local function RebuildIndex()
@@ -34,9 +100,15 @@ local function RebuildIndex()
 
     for key, record in pairs(data.players or {}) do
         if type(record) == "table" then
-            local canonical = record.name or key
-            playerIndex[canonical] = record
-            lowerIndex[string.lower(canonical)] = record
+            local keyRealm, keyName = tostring(key):match("^([^|]+)|(.+)$")
+            local canonical = record.name or keyName or key
+            local realm = ResolveRealm(record.realm or keyRealm or (data.meta and data.meta.realm) or DEFAULT_REALM)
+            if realm then
+                record.realm = realm
+                local exactKey = NormalizeRealm(realm) .. "|" .. canonical
+                playerIndex[exactKey] = record
+                lowerIndex[AsciiLower(exactKey)] = record
+            end
         end
     end
 end
@@ -53,10 +125,6 @@ local function SplitPlayerName(fullName)
     end
 
     return name, realm
-end
-
-local function IsSupportedRealm(realm)
-    return NormalizeRealm(realm) == NormalizeRealm(DEFAULT_REALM)
 end
 
 local function RequestCount()
@@ -86,11 +154,12 @@ end
 
 local function QueuePlayer(fullName, highPriority)
     local name, realm = SplitPlayerName(fullName)
-    if not name or not IsSupportedRealm(realm) then
-        return
+    local canonicalRealm = ResolveRealm(realm)
+    if not name or not canonicalRealm then
+        return false
     end
 
-    local key = DEFAULT_REALM .. "|" .. name
+    local key = canonicalRealm .. "|" .. name
     if not NightslayerRatingRequests[key] and RequestCount() >= MAX_REQUESTS then
         RemoveOldestRequest()
     end
@@ -100,6 +169,7 @@ local function QueuePlayer(fullName, highPriority)
         stamp = stamp + PRIORITY_OFFSET
     end
     NightslayerRatingRequests[key] = stamp
+    return true
 end
 
 local function UsableLeaderName(value)
@@ -247,12 +317,20 @@ local function PlayerNameFromUnitTooltip(tooltip)
     return name .. "-" .. realm, unitToken
 end
 
-local function LookupRecord(name)
-    if not name then
+local function LookupRecord(name, realm)
+    local key = PlayerKey(name, realm)
+    if not key then
         return nil
     end
 
-    return playerIndex[name] or lowerIndex[string.lower(name)]
+    local localRecord = playerIndex[key] or lowerIndex[key]
+    if localRecord and localRecord.exact == true then
+        return localRecord
+    end
+
+    local sharedKey = SharedLookupKey(name, realm)
+    local sharedRecord = sharedKey and data.sharedPlayers and data.sharedPlayers[sharedKey]
+    return sharedRecord or localRecord
 end
 
 local function RatingText(value)
@@ -263,6 +341,58 @@ local function RatingText(value)
     return tostring(math.floor(value + 0.5))
 end
 
+local function GetCutoffs(bracket)
+    local cutoffSeason = tonumber(data.cutoffSeason)
+    local currentSeason = data.meta and tonumber(data.meta.season)
+    local cutoffs = data.cutoffs and data.cutoffs[bracket]
+    if cutoffSeason == currentSeason and type(cutoffs) == "table" then
+        return cutoffs
+    end
+    if currentSeason == DEFAULT_CUTOFF_SEASON then
+        return DEFAULT_CUTOFFS[bracket]
+    end
+    return nil
+end
+
+local function GetRatingTier(bracket, value)
+    local rating = tonumber(value) or 0
+    if rating <= 0 then
+        return UNRANKED_TIER
+    end
+
+    local cutoffs = GetCutoffs(bracket)
+    if type(cutoffs) ~= "table" then
+        return NO_CUTOFF_TIER
+    end
+
+    for _, tier in ipairs(RATING_TIERS) do
+        local cutoff = tonumber(cutoffs[tier.key]) or 0
+        if cutoff > 0 and rating >= cutoff then
+            return tier
+        end
+    end
+
+    return UNRANKED_TIER
+end
+
+local function ColorText(tier, text)
+    return "|cff" .. tier.hex .. tostring(text) .. "|r"
+end
+
+local function ColoredRating(bracket, value)
+    return ColorText(GetRatingTier(bracket, value), RatingText(value))
+end
+
+local function RatingBandLabel(bracket, current, best)
+    local rating = tonumber(current) or 0
+    if rating <= 0 then
+        rating = tonumber(best) or 0
+    end
+
+    local tier = GetRatingTier(bracket, rating)
+    return ColorText(tier, tier.label)
+end
+
 local function ShowWhisperRating(fullName)
     if not NightslayerRatingSettings.enabled then
         return
@@ -270,20 +400,25 @@ local function ShowWhisperRating(fullName)
 
     local name, realm = SplitPlayerName(fullName)
     name = UsableLeaderName(name)
-    if not name or not IsSupportedRealm(realm) then
+    local canonicalRealm = ResolveRealm(realm)
+    if not name or not canonicalRealm then
         return
     end
 
-    local notificationKey = string.lower(name)
+    local notificationKey = PlayerKey(name, canonicalRealm)
     if whisperNotified[notificationKey] then
         return
     end
     whisperNotified[notificationKey] = true
 
-    QueuePlayer(name .. "-" .. DEFAULT_REALM, true)
+    QueuePlayer(name .. "-" .. canonicalRealm, true)
 
-    local prefix = "|cffffd200[NSR]|r " .. name .. ": "
-    local record = LookupRecord(name)
+    local displayName = name
+    if canonicalRealm ~= DEFAULT_REALM then
+        displayName = displayName .. "-" .. canonicalRealm
+    end
+    local prefix = "|cffffd200[NSR]|r " .. displayName .. ": "
+    local record = LookupRecord(name, canonicalRealm)
     if not record then
         DEFAULT_CHAT_FRAME:AddMessage(prefix .. "rating not cached yet; lookup queued automatically")
         return
@@ -296,11 +431,12 @@ local function ShowWhisperRating(fullName)
         local best = record.best and record.best[bracket]
         if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
             parts[#parts + 1] = string.format(
-                "%dv%d %s current / %s %s%s",
+                "%dv%d %s: %s current / %s %s%s",
                 bracket,
                 bracket,
-                RatingText(current),
-                RatingText(best),
+                RatingBandLabel(bracket, current, best),
+                ColoredRating(bracket, current),
+                ColoredRating(bracket, best),
                 exact and "high" or "best cached",
                 exact and "" or "*"
             )
@@ -320,21 +456,22 @@ local function AddRatingLines(tooltip, fullName, resultID)
     end
 
     local name, realm = SplitPlayerName(fullName)
-    if not name or not IsSupportedRealm(realm) then
+    local canonicalRealm = ResolveRealm(realm)
+    if not name or not canonicalRealm then
         return
     end
 
-    local token = tostring(resultID or "tooltip") .. ":" .. name
+    local token = tostring(resultID or "tooltip") .. ":" .. canonicalRealm .. ":" .. name
     if tooltip.NightslayerRatingToken == token then
         return
     end
     tooltip.NightslayerRatingToken = token
 
-    QueuePlayer(name .. "-" .. DEFAULT_REALM, true)
+    QueuePlayer(name .. "-" .. canonicalRealm, true)
 
-    local record = LookupRecord(name)
+    local record = LookupRecord(name, canonicalRealm)
     tooltip:AddLine(" ")
-    tooltip:AddLine("IronForge Rating |cff9d9d9d- Nightslayer|r", 1.00, 0.82, 0.00)
+    tooltip:AddLine("IronForge Rating |cff9d9d9d- " .. canonicalRealm .. "|r", 1.00, 0.82, 0.00)
 
     if not record then
         tooltip:AddLine("Current rating not cached yet", 0.75, 0.75, 0.75)
@@ -354,14 +491,20 @@ local function AddRatingLines(tooltip, fullName, resultID)
             foundRating = true
             local bestLabel = exact and "High " or "Best cached "
             local suffix = exact and "" or "*"
+            local left = string.format(
+                "%dv%d  %s",
+                bracket,
+                bracket,
+                RatingBandLabel(bracket, current, best)
+            )
             local right = string.format(
-                "Current |cffffffff%s|r   %s|cff00ff98%s%s|r",
-                RatingText(current),
+                "Current %s   %s%s%s",
+                ColoredRating(bracket, current),
                 bestLabel,
-                RatingText(best),
+                ColoredRating(bracket, best),
                 suffix
             )
-            tooltip:AddDoubleLine(bracket .. "v" .. bracket, right, 0.35, 0.75, 1.00, 0.80, 0.80, 0.80)
+            tooltip:AddDoubleLine(left, right, 0.35, 0.75, 1.00, 0.80, 0.80, 0.80)
         end
     end
 
@@ -424,16 +567,17 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
     end
 
     local name, realm = SplitPlayerName(fullName)
-    if not name or not IsSupportedRealm(realm) then
+    local canonicalRealm = ResolveRealm(realm)
+    if not name or not canonicalRealm then
         return
     end
 
-    QueuePlayer(name .. "-" .. DEFAULT_REALM, true)
+    QueuePlayer(name .. "-" .. canonicalRealm, true)
 
     local displayLines = {
-        { "IronForge Rating - Nightslayer", 1.00, 0.82, 0.00 },
+        { "IronForge Rating - " .. canonicalRealm, 1.00, 0.82, 0.00 },
     }
-    local record = LookupRecord(name)
+    local record = LookupRecord(name, canonicalRealm)
 
     if not record then
         displayLines[#displayLines + 1] = { "Current rating not cached yet", 0.75, 0.75, 0.75 }
@@ -452,16 +596,17 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
                 local suffix = exact and "" or "*"
                 displayLines[#displayLines + 1] = {
                     string.format(
-                        "%dv%d  Current %s   %s %s%s",
+                        "|cff59bfff%dv%d|r  %s   Current %s   %s %s%s",
                         bracket,
                         bracket,
-                        RatingText(current),
+                        RatingBandLabel(bracket, current, best),
+                        ColoredRating(bracket, current),
                         bestLabel,
-                        RatingText(best),
+                        ColoredRating(bracket, best),
                         suffix
                     ),
-                    0.35,
-                    0.75,
+                    1.00,
+                    1.00,
                     1.00,
                 }
             end
@@ -508,7 +653,7 @@ local function InstallHooks()
             if not AddByResultID(tooltip, resultID) then
                 local name = NameFromTooltip(tooltip)
                 if name then
-                    AddRatingLines(tooltip, name .. "-" .. DEFAULT_REALM, resultID)
+                    AddRatingLines(tooltip, name, resultID)
                 end
             end
         end)
@@ -522,7 +667,7 @@ local function InstallHooks()
                 if not AddByResultID(GameTooltip, resultID) then
                     local name = NameFromTooltip(GameTooltip)
                     if name then
-                        AddRatingLines(GameTooltip, name .. "-" .. DEFAULT_REALM, resultID)
+                        AddRatingLines(GameTooltip, name, resultID)
                     end
                 end
             end
@@ -588,7 +733,7 @@ GameTooltip:HookScript("OnShow", function(tooltip)
 
         local name = NameFromTooltip(tooltip)
         if name then
-            AddRatingLines(tooltip, name .. "-" .. DEFAULT_REALM)
+            AddRatingLines(tooltip, name)
         end
     end)
 end)
@@ -632,24 +777,43 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         NightslayerRatingSettings.enabled = false
         print("|cffffd200Nightslayer Rating:|r disabled")
     elseif command == "lookup" and rest ~= "" then
-        QueuePlayer(rest .. "-" .. DEFAULT_REALM, true)
-        print("|cffffd200Nightslayer Rating:|r queued " .. rest .. " for automatic lookup")
+        if QueuePlayer(rest, true) then
+            print("|cffffd200Nightslayer Rating:|r queued " .. rest .. " for automatic lookup")
+        else
+            print("|cffffd200Nightslayer Rating:|r use NAME or NAME-Nightslayer/Dreamscythe")
+        end
     else
-        local players = 0
         local exact = 0
+        local realmCounts = { Nightslayer = 0, Dreamscythe = 0 }
+        local packagedCounts = data.meta and data.meta.counts
+        local hasPackagedCounts = type(packagedCounts) == "table" and
+            ((tonumber(packagedCounts.Nightslayer) or 0) +
+            (tonumber(packagedCounts.Dreamscythe) or 0)) > 0
+        if hasPackagedCounts then
+            realmCounts.Nightslayer = tonumber(packagedCounts.Nightslayer) or 0
+            realmCounts.Dreamscythe = tonumber(packagedCounts.Dreamscythe) or 0
+        end
+
         for _, record in pairs(data.players or {}) do
-            players = players + 1
+            local recordRealm = ResolveRealm(record.realm or (data.meta and data.meta.realm) or DEFAULT_REALM)
+            if recordRealm and not hasPackagedCounts then
+                realmCounts[recordRealm] = (realmCounts[recordRealm] or 0) + 1
+            end
             if record.exact then
                 exact = exact + 1
             end
         end
+        local players = realmCounts.Nightslayer + realmCounts.Dreamscythe
 
         print(string.format(
-            "|cffffd200Nightslayer Rating:|r %d cached players, %d exact lifetime highs, season %s",
+            "|cffffd200Nightslayer Rating:|r %d cached players (%d Nightslayer, %d Dreamscythe), %d exact lifetime highs, season %s, cutoff colors %s",
             players,
+            realmCounts.Nightslayer,
+            realmCounts.Dreamscythe,
             exact,
-            tostring((data.meta and data.meta.season) or "?")
+            tostring((data.meta and data.meta.season) or "?"),
+            GetCutoffs(2) and "loaded" or "unavailable"
         ))
-        print("Commands: /nsr on, /nsr off, /nsr lookup NAME")
+        print("Commands: /nsr on, /nsr off, /nsr lookup NAME[-REALM]")
     end
 end

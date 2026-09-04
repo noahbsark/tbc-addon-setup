@@ -22,6 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test snapshot publisher
+        run: python -m unittest central-rating-data/test_build_shared_cache.py
+
       - name: Build shared snapshot
         run: |
           python central-rating-data/build_shared_cache.py \
