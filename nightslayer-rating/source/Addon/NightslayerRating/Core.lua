@@ -464,7 +464,7 @@ local function ShowWhisperRating(fullName)
                 RatingBandLabel(current),
                 ColoredRating(current),
                 ColoredRating(best),
-                exact and "high" or "best cached",
+                exact and "record high" or "observed",
                 exact and "" or "*"
             )
         end
@@ -520,7 +520,7 @@ local function AddRatingLines(tooltip, fullName, resultID)
 
         if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
             foundRating = true
-            local bestLabel = exact and "High " or "Best cached "
+            local bestLabel = exact and "Record " or "Observed "
             local suffix = exact and "" or "*"
             local left = string.format(
                 "%dv%d  %s",
@@ -545,7 +545,7 @@ local function AddRatingLines(tooltip, fullName, resultID)
         if AutomaticExactLookupAvailable() then
             tooltip:AddLine("* Exact lifetime high is queued", 0.55, 0.55, 0.55)
         else
-            tooltip:AddLine("* Highest rating seen in tracked leaderboards", 0.55, 0.55, 0.55)
+            tooltip:AddLine("* Observed leaderboard value; not a lifetime peak", 0.55, 0.55, 0.55)
         end
     end
 
@@ -644,7 +644,7 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
 
             if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
                 foundRating = true
-                local bestLabel = exact and "High" or "Best cached"
+                local bestLabel = exact and "Record" or "Observed"
                 local suffix = exact and "" or "*"
                 displayLines[#displayLines + 1] = {
                     string.format(
@@ -670,7 +670,7 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
             displayLines[#displayLines + 1] = {
                 AutomaticExactLookupAvailable()
                     and "* Exact lifetime high is queued"
-                    or "* Highest rating seen in tracked leaderboards",
+                    or "* Observed leaderboard value; not a lifetime peak",
                 0.55,
                 0.55,
                 0.55,

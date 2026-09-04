@@ -1,17 +1,17 @@
 # Nightslayer Rating
 
-Free World of Warcraft TBC Anniversary addon for Nightslayer and Dreamscythe US. It adds current and highest-recorded 2v2, 3v3, and 5v5 ratings to Group Finder tooltips, normal player tooltips, and a private local summary when someone whispers you.
+Free World of Warcraft TBC Anniversary addon for Nightslayer and Dreamscythe US. It adds current, observed, and exact-record 2v2, 3v3, and 5v5 ratings to Group Finder tooltips, normal player tooltips, and a private local summary when someone whispers you.
 
 [Download and install](https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/) · [Report a bug](https://github.com/noahbsark/tbc-addon-setup/issues) · [Shared data status](https://github.com/noahbsark/tbc-addon-setup/releases/tag/ratings-data)
 
 ## What the numbers mean
 
 - **Current** is the newest current-season rating published by the source.
-- **High** is the exact lifetime bracket high returned by the character profile after the Windows companion processes a recently encountered name.
-- **Best cached\*** is the highest rating seen in the tracked leaderboards when an exact profile has not completed.
+- **Record** is the exact lifetime bracket high returned by the character profile after the Windows companion processes a character.
+- **Observed\*** is only a rating found in a tracked leaderboard snapshot. It is never presented as a lifetime peak.
 - Rated, Competitive, Strong, Excellent, and Elite are neutral visual bands. They are not official arena titles or achievement claims.
 
-The addon-only ZIP contains a point-in-time shared snapshot. The Windows bundle adds an hourly updater and focused exact-profile lookups. WoW itself cannot contact websites, and externally updated data becomes visible after the next login or `/reload`.
+The addon-only ZIP contains a point-in-time shared snapshot. The Windows bundle adds an hourly updater and focused exact-profile lookups. It discovers your own Nightslayer and Dreamscythe character folders automatically; encountered players are queued after WoW saves its variables. WoW itself cannot contact websites, and externally updated data becomes visible after the next login or `/reload`.
 
 ## Data and privacy
 

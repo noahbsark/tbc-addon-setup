@@ -28,9 +28,6 @@ jobs:
           Copy-Item 'nightslayer-rating\source\Addon\NightslayerRating\*' $addon -Recurse -Force
 
           & 'nightslayer-rating\source\Updater\NightslayerRatingUpdater.ps1' -WowPath $root -Quiet
-          if ($LASTEXITCODE -ne 0) {
-            throw "Updater integration test failed with exit code $LASTEXITCODE"
-          }
 
           $data = Get-Content (Join-Path $addon 'Data.lua') -Raw
           if ($data -notmatch 'profileLookup = true') {

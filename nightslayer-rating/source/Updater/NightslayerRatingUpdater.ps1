@@ -359,7 +359,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.0 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.2.1 (local WoW addon updater; low-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -405,7 +405,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.0 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.2.1 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()
@@ -699,6 +699,32 @@ function Get-QueuedRequests {
                 }
             } catch {
                 Write-Log ('Could not inspect ' + $savedVariables)
+            }
+
+            # Character folders are available even before WoW flushes SavedVariables.
+            # Queue the user's own supported-realm characters automatically so their
+            # record ratings are exact on the first updater run after installation.
+            foreach ($realmDirectory in @(Get-ChildItem -LiteralPath $accountDirectory.FullName -Directory -ErrorAction SilentlyContinue)) {
+                $realm = Resolve-SupportedRealm $realmDirectory.Name
+                if ($null -eq $realm) {
+                    continue
+                }
+                foreach ($characterDirectory in @(Get-ChildItem -LiteralPath $realmDirectory.FullName -Directory -ErrorAction SilentlyContinue)) {
+                    $name = [string]$characterDirectory.Name
+                    if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -gt 24 -or
+                        $name -notmatch '^[^"|\\]+$') {
+                        continue
+                    }
+                    $key = (Normalize-Realm $realm) + '|' + $name.ToLowerInvariant()
+                    if (-not $requests.ContainsKey($key)) {
+                        $requests[$key] = [pscustomobject]@{
+                            Name = $name
+                            Realm = $realm
+                            Stamp = $now
+                            Priority = $true
+                        }
+                    }
+                }
             }
         }
     }

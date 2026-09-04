@@ -1,5 +1,13 @@
-NIGHTSLAYER RATING 1.2.0
+NIGHTSLAYER RATING 1.2.1
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.2.1
+---------------------
+- Exact IronForge record ratings are now labeled "Record"; leaderboard-only
+  values are labeled "Observed*" and never presented as lifetime peaks.
+- The Windows updater discovers your own supported-realm character folders, so
+  it can fetch their exact records without waiting for a SavedVariables flush.
+- Fixed the Windows integration test's success detection.
 
 WHAT CHANGED IN 1.2.0
 ---------------------
@@ -25,8 +33,8 @@ WHAT IT DOES
 ------------
 Hover a player in Blizzard's Looking For Group / Group Finder panel, in the
 world, on a unit frame, or in a battleground. The tooltip gains color-coded
-IronForge 2v2, 3v3, and 5v5 rows showing current rating and the highest recorded
-rating.
+IronForge 2v2, 3v3, and 5v5 rows showing current rating and, after an exact
+profile lookup, the record rating.
 
 When a character whispers you, or you whisper them, a private [NSR] line in
 your chat shows the same summary once per character per login. The other player
@@ -54,17 +62,18 @@ outside the game and writes Data.lua, which WoW reads at login or /reload.
    historical leaderboard ratings for Nightslayer and Dreamscythe from IronForge.
 2. Each installed companion downloads that read-only compressed snapshot. No
    GitHub password or token is installed on users' computers.
-3. Names encountered in Group Finder, unit tooltips, battlegrounds, or whispers
-   are saved in this addon's own SavedVariables queue.
-4. After WoW next saves that queue during logout, exit, or /reload, the companion
-   asks IronForge for exact lifetime highs for up to 10 recent profiles per run.
+3. Your own Nightslayer and Dreamscythe characters are discovered automatically
+   from their local WTF folders. Names encountered in Group Finder, unit
+   tooltips, battlegrounds, or whispers are saved in this addon's queue.
+4. After WoW saves encountered names during logout, exit, or /reload, the
+   companion asks IronForge for exact record ratings for up to 10 profiles/run.
 5. New data appears at the next login or /reload. A running WoW client cannot
    hot-load an externally changed addon file.
 
 If GitHub's shared snapshot is temporarily unavailable, the companion falls back
-to IronForge's bulk endpoints and continues working. A tooltip says "Best cached*"
-until an exact profile lookup has completed; it never labels an approximation as
-an exact lifetime high.
+to IronForge's bulk endpoints and continues working. A tooltip says "Observed*"
+until an exact profile lookup has completed and explains that this is only a
+leaderboard snapshot, never an exact lifetime high.
 
 Colors are a fixed visual guide: gray inactive, white rated, green competitive
 (1500+), blue strong (1800+), purple excellent (2100+), and orange elite (2400+).
