@@ -1,5 +1,11 @@
-NIGHTSLAYER RATING 1.2.2
+NIGHTSLAYER RATING 1.2.3
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.2.3
+---------------------
+- Older SavedVariables request entries without a Priority field are migrated
+  safely instead of interrupting exact-profile queue parsing.
+- Updater output now separates profiles due for fetching from fresh cached rows.
 
 WHAT CHANGED IN 1.2.2
 ---------------------

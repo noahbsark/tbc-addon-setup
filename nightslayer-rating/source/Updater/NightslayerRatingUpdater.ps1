@@ -384,7 +384,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.2 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.2.3 (local WoW addon updater; low-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -430,7 +430,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.2 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.2.3 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()
@@ -739,8 +739,10 @@ function Get-QueuedRequests {
                     }
                     $key = (Normalize-Realm $realm) + '|' + $name.ToLowerInvariant()
                     $existing = $(if ($requests.ContainsKey($key)) { $requests[$key] } else { $null })
-                    if ($null -eq $existing -or $priority -and -not $existing.Priority -or
-                        $priority -eq $existing.Priority -and $stamp -gt $existing.Stamp) {
+                    $existingPriority = [bool](Get-ObjectProperty $existing 'Priority')
+                    $existingStamp = [int64]((Get-ObjectProperty $existing 'Stamp') -as [int64])
+                    if ($null -eq $existing -or $priority -and -not $existingPriority -or
+                        $priority -eq $existingPriority -and $stamp -gt $existingStamp) {
                         $requests[$key] = [pscustomobject]@{
                             Name = $name
                             Realm = $realm
@@ -786,6 +788,9 @@ function Sync-QueuedProfiles {
             $candidates += $request
         }
     }
+
+    Write-Log ('Exact profiles: {0} due now, {1} already cached or temporarily unavailable.' -f `
+        $candidates.Count, ($requests.Count - $candidates.Count))
 
     $processed = 0
     foreach ($request in @($candidates | Select-Object -First $ProfileLimitPerRun)) {
