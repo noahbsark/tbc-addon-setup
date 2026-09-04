@@ -1,5 +1,11 @@
-NIGHTSLAYER RATING 1.2.1
+NIGHTSLAYER RATING 1.2.2
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.2.2
+---------------------
+- SavedVariables can now be read while WoW holds the file open.
+- Local character-folder discovery no longer depends on SavedVariables existing.
+- Queue diagnostics report the request count and the actual file-read error.
 
 WHAT CHANGED IN 1.2.1
 ---------------------

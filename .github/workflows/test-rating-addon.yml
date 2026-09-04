@@ -27,7 +27,29 @@ jobs:
           New-Item -ItemType Directory -Path $addon -Force | Out-Null
           Copy-Item 'nightslayer-rating\source\Addon\NightslayerRating\*' $addon -Recurse -Force
 
-          & 'nightslayer-rating\source\Updater\NightslayerRatingUpdater.ps1' -WowPath $root -Quiet
+          $account = Join-Path $root 'WTF\Account\INTEGRATION'
+          $character = Join-Path $account 'Nightslayer\Reefey'
+          $savedVariables = Join-Path $account 'SavedVariables\NightslayerRating.lua'
+          New-Item -ItemType Directory -Path $character -Force | Out-Null
+          New-Item -ItemType Directory -Path (Split-Path $savedVariables) -Force | Out-Null
+          $requestStamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 2000000000
+          [IO.File]::WriteAllText(
+            $savedVariables,
+            ('NightslayerRatingRequests = {{ ["Nightslayer|Reefey"] = {0} }}' -f $requestStamp),
+            (New-Object Text.UTF8Encoding($false))
+          )
+
+          $heldFile = [IO.File]::Open(
+            $savedVariables,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::ReadWrite
+          )
+          try {
+            & 'nightslayer-rating\source\Updater\NightslayerRatingUpdater.ps1' -WowPath $root -Quiet
+          } finally {
+            $heldFile.Dispose()
+          }
 
           $data = Get-Content (Join-Path $addon 'Data.lua') -Raw
           if ($data -notmatch 'profileLookup = true') {
@@ -35,4 +57,7 @@ jobs:
           }
           if ($data -notmatch '\["[0-9a-f]{16}"\] = \{ \d+, \d+, \d+, \d+, \d+, \d+ \}') {
             throw 'Generated Data.lua does not contain compact shared records.'
+          }
+          if ($data -notmatch '\["Nightslayer\|Reefey"\][\s\S]+?exact = true') {
+            throw 'Generated Data.lua does not contain the exact queued profile.'
           }

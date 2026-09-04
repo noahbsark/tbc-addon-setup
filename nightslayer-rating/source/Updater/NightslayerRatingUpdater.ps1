@@ -74,6 +74,31 @@ function Write-AtomicUtf8 {
     }
 }
 
+function Read-SharedUtf8 {
+    param([string]$Path)
+
+    # WoW may keep SavedVariables open while the game is running. Open with
+    # ReadWrite/Delete sharing so the updater can inspect the last flushed copy.
+    $stream = $null
+    $reader = $null
+    try {
+        $stream = [IO.File]::Open(
+            $Path,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+        )
+        $reader = New-Object IO.StreamReader($stream, $Utf8NoBom, $true)
+        return $reader.ReadToEnd()
+    } finally {
+        if ($null -ne $reader) {
+            $reader.Dispose()
+        } elseif ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
 function Get-ObjectProperty {
     param(
         $Object,
@@ -359,7 +384,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.1 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.2.2 (local WoW addon updater; low-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -405,7 +430,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.1 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.2.2 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()
@@ -663,13 +688,40 @@ function Get-QueuedRequests {
     $accountRoot = Join-Path $GamePath 'WTF\Account'
     if (Test-Path -LiteralPath $accountRoot) {
         foreach ($accountDirectory in @(Get-ChildItem -LiteralPath $accountRoot -Directory -ErrorAction SilentlyContinue)) {
+            # Character folders are available even before WoW flushes SavedVariables.
+            foreach ($realmDirectory in @(Get-ChildItem -LiteralPath $accountDirectory.FullName -Directory -ErrorAction SilentlyContinue)) {
+                $realm = Resolve-SupportedRealm $realmDirectory.Name
+                if ($null -eq $realm) {
+                    continue
+                }
+                foreach ($characterDirectory in @(Get-ChildItem -LiteralPath $realmDirectory.FullName -Directory -ErrorAction SilentlyContinue)) {
+                    $name = [string]$characterDirectory.Name
+                    if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -gt 24 -or
+                        $name -notmatch '^[^"|\\]+$') {
+                        continue
+                    }
+                    $key = (Normalize-Realm $realm) + '|' + $name.ToLowerInvariant()
+                    if (-not $requests.ContainsKey($key)) {
+                        $requests[$key] = [pscustomobject]@{
+                            Name = $name
+                            Realm = $realm
+                            Stamp = $now
+                            Priority = $true
+                        }
+                    }
+                }
+            }
+
             $savedVariables = Join-Path $accountDirectory.FullName 'SavedVariables\NightslayerRating.lua'
             if (-not (Test-Path -LiteralPath $savedVariables)) {
                 continue
             }
 
             try {
-                $text = Get-Content -LiteralPath $savedVariables -Raw -Encoding UTF8
+                $text = Read-SharedUtf8 -Path $savedVariables
+                if ([string]::IsNullOrWhiteSpace($text)) {
+                    continue
+                }
                 $pattern = '\["(?<realm>Nightslayer|Dreamscythe)\|(?<name>[^"\\]+)"\]\s*=\s*(?<stamp>\d+)'
                 foreach ($match in [regex]::Matches($text, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
                     $name = $match.Groups['name'].Value
@@ -698,37 +750,12 @@ function Get-QueuedRequests {
                     }
                 }
             } catch {
-                Write-Log ('Could not inspect ' + $savedVariables)
-            }
-
-            # Character folders are available even before WoW flushes SavedVariables.
-            # Queue the user's own supported-realm characters automatically so their
-            # record ratings are exact on the first updater run after installation.
-            foreach ($realmDirectory in @(Get-ChildItem -LiteralPath $accountDirectory.FullName -Directory -ErrorAction SilentlyContinue)) {
-                $realm = Resolve-SupportedRealm $realmDirectory.Name
-                if ($null -eq $realm) {
-                    continue
-                }
-                foreach ($characterDirectory in @(Get-ChildItem -LiteralPath $realmDirectory.FullName -Directory -ErrorAction SilentlyContinue)) {
-                    $name = [string]$characterDirectory.Name
-                    if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -gt 24 -or
-                        $name -notmatch '^[^"|\\]+$') {
-                        continue
-                    }
-                    $key = (Normalize-Realm $realm) + '|' + $name.ToLowerInvariant()
-                    if (-not $requests.ContainsKey($key)) {
-                        $requests[$key] = [pscustomobject]@{
-                            Name = $name
-                            Realm = $realm
-                            Stamp = $now
-                            Priority = $true
-                        }
-                    }
-                }
+                Write-Log ('Could not inspect {0}: {1}' -f $savedVariables, $_.Exception.Message)
             }
         }
     }
 
+    Write-Log ('Exact-profile queue: found {0} unique character request(s).' -f $requests.Count)
     return @($requests.Values | Sort-Object -Property `
         @{ Expression = 'Priority'; Descending = $true }, `
         @{ Expression = 'Stamp'; Descending = $true })

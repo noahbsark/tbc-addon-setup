@@ -2,7 +2,7 @@
 ## Title: Nightslayer Rating
 ## Notes: Shows color-coded IronForge ratings for Nightslayer and Dreamscythe in tooltips and chat.
 ## Author: noahbsark
-## Version: 1.2.1
+## Version: 1.2.2
 ## SavedVariables: NightslayerRatingRequests, NightslayerRatingSettings
 ## OptionalDeps: Blizzard_GroupFinder, Blizzard_GroupFinder_VanillaStyle
 
