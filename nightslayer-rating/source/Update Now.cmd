@@ -1,0 +1,20 @@
+@echo off
+setlocal
+title Nightslayer Rating Updater
+set "UPDATER=%LOCALAPPDATA%\NightslayerRating\NightslayerRatingUpdater.ps1"
+if not exist "%UPDATER%" (
+  echo Nightslayer Rating is not installed. Run Install.cmd first.
+  echo.
+  pause
+  exit /b 1
+)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%UPDATER%"
+set "UPDATE_EXIT=%ERRORLEVEL%"
+echo.
+if "%UPDATE_EXIT%"=="0" (
+  echo Rating cache updated. Restart WoW or type /reload to load it now.
+) else (
+  echo Update failed. See %%LOCALAPPDATA%%\NightslayerRating\updater.log
+)
+pause
+exit /b %UPDATE_EXIT%

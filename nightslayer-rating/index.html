@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Free TBC Anniversary addon for Nightslayer that adds current and highest-ever arena ratings to Group Finder player tooltips.">
+  <meta name="theme-color" content="#101815">
+  <meta property="og:title" content="Nightslayer Rating — TBC Anniversary Addon">
+  <meta property="og:description" content="Hover a Group Finder name to see current and highest-ever 2v2, 3v3, and 5v5 ratings.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/">
+  <meta property="og:image" content="https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/group-finder.png">
+  <link rel="canonical" href="https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/">
+  <title>Nightslayer Rating — TBC Anniversary Addon</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f6f0e3;
+      --muted: #aeb7b2;
+      --night: #0b100f;
+      --panel: #111a18;
+      --panel-2: #18231f;
+      --line: #2b3a35;
+      --teal: #63d7ca;
+      --teal-dark: #0e6d66;
+      --gold: #e7bb61;
+      --blue: #65bdff;
+      --green: #81d79d;
+      --shadow: 0 26px 80px rgba(0, 0, 0, .38);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 4%, rgba(17, 112, 101, .22), transparent 30rem),
+        radial-gradient(circle at 90% 30%, rgba(196, 139, 39, .1), transparent 31rem),
+        var(--night);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a { color: inherit; }
+    img { max-width: 100%; }
+    .shell { width: min(1120px, calc(100% - 40px)); margin-inline: auto; }
+
+    .nav {
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      font-weight: 760;
+      letter-spacing: -.01em;
+    }
+
+    .mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--gold);
+      color: var(--gold);
+      transform: rotate(45deg);
+      font-family: Georgia, serif;
+    }
+
+    .mark span { transform: rotate(-45deg); }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a { color: var(--muted); font-size: 14px; text-underline-offset: 5px; }
+    .nav-links a:hover { color: var(--ink); }
+
+    .hero {
+      padding: 88px 0 58px;
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 72px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      margin: 0 0 18px;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; }
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(48px, 6.4vw, 82px);
+      line-height: .99;
+      letter-spacing: -.045em;
+    }
+
+    h1 em { color: var(--gold); font-style: normal; }
+    .lede { max-width: 660px; margin: 25px 0 0; color: var(--muted); font-size: 18px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 31px; }
+
+    .button {
+      min-height: 52px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 0 20px;
+      border: 1px solid var(--teal);
+      background: var(--teal-dark);
+      color: #fff;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 780;
+      transition: transform .15s ease, background .15s ease;
+    }
+
+    .button:hover { transform: translateY(-2px); background: #118078; }
+    .button.secondary { border-color: var(--line); background: transparent; color: var(--ink); }
+    .button.secondary:hover { background: var(--panel-2); }
+    .fine { margin-top: 13px; color: #7f8e88; font-size: 12px; }
+
+    .tooltip-demo {
+      position: relative;
+      padding: 26px;
+      border: 1px solid var(--line);
+      background: linear-gradient(145deg, rgba(25, 39, 35, .95), rgba(12, 18, 17, .96));
+      box-shadow: var(--shadow);
+    }
+
+    .tooltip-demo::before {
+      content: "LIVE TOOLTIP EXAMPLE";
+      position: absolute;
+      right: 16px;
+      top: 13px;
+      color: #70817a;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .14em;
+    }
+
+    .player { color: var(--gold); font-size: 20px; margin: 7px 0 2px; }
+    .realm { color: var(--muted); font-size: 13px; }
+    .rule { height: 1px; margin: 20px 0 16px; background: var(--line); }
+    .rating-row { display: grid; grid-template-columns: 44px 1fr auto; gap: 13px; padding: 7px 0; align-items: baseline; }
+    .bracket { color: var(--blue); font-weight: 800; }
+    .label { color: var(--muted); font-size: 13px; }
+    .numbers { font-variant-numeric: tabular-nums; font-size: 14px; }
+    .numbers strong { color: var(--green); }
+    .source { margin: 14px 0 0; color: #70817a; font-size: 11px; }
+
+    .trust-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border: 1px solid var(--line);
+      background: rgba(17, 26, 24, .74);
+    }
+
+    .trust-strip div { padding: 22px 24px; border-right: 1px solid var(--line); }
+    .trust-strip div:last-child { border-right: 0; }
+    .trust-strip strong { display: block; color: var(--gold); font: 23px Georgia, serif; }
+    .trust-strip span { color: var(--muted); font-size: 12px; }
+
+    section { padding: 88px 0; }
+    .section-head { max-width: 720px; margin-bottom: 38px; }
+    h2 { margin: 0; font-size: clamp(37px, 5vw, 54px); line-height: 1.08; letter-spacing: -.025em; }
+    .section-head p:last-child { color: var(--muted); font-size: 16px; }
+
+    .showcase { display: grid; grid-template-columns: 1.06fr .94fr; gap: 24px; align-items: stretch; }
+    .shot, .feature-card { border: 1px solid var(--line); background: var(--panel); }
+    .shot { margin: 0; overflow: hidden; }
+    .shot img { width: 100%; height: 100%; min-height: 410px; display: block; object-fit: cover; object-position: left center; }
+    .feature-card { padding: 38px; }
+    .feature-card h3 { margin: 0 0 24px; font-size: 30px; }
+    .feature { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 17px 0; border-top: 1px solid var(--line); }
+    .feature:first-of-type { border-top: 0; }
+    .feature b { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--gold); color: var(--gold); font: 14px Georgia, serif; }
+    .feature strong { display: block; margin-bottom: 4px; }
+    .feature p { margin: 0; color: var(--muted); font-size: 13px; }
+
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); }
+    .step { min-height: 230px; padding: 30px; border-right: 1px solid var(--line); background: var(--panel); }
+    .step:last-child { border-right: 0; }
+    .step-number { color: var(--gold); font: 36px Georgia, serif; }
+    .step h3 { margin: 28px 0 9px; font-size: 23px; }
+    .step p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .download-card { display: flex; flex-direction: column; padding: 34px; border: 1px solid var(--line); background: var(--panel); }
+    .download-card.recommended { border-color: #436c62; background: linear-gradient(145deg, #182722, #111917); }
+    .tag { align-self: flex-start; padding: 5px 8px; color: var(--gold); border: 1px solid #6b5730; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+    .download-card h3 { margin: 20px 0 8px; font-size: 30px; }
+    .download-card p { color: var(--muted); font-size: 14px; }
+    .download-card ul { margin: 13px 0 27px; padding-left: 20px; color: var(--muted); font-size: 13px; }
+    .download-card .button { margin-top: auto; }
+
+    .safety {
+      display: grid;
+      grid-template-columns: .9fr 1.1fr;
+      gap: 56px;
+      padding: 44px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+    }
+
+    .safety h2 { font-size: 39px; }
+    .safety p, .safety li { color: var(--muted); font-size: 14px; }
+    .safety ul { margin: 0; padding-left: 19px; }
+    .safety li + li { margin-top: 9px; }
+    code { overflow-wrap: anywhere; color: #d6ded9; font: 11px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .source-links { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 21px; }
+    .source-links a { color: var(--teal); font-size: 13px; font-weight: 700; text-underline-offset: 4px; }
+
+    footer { padding: 28px 0 40px; border-top: 1px solid var(--line); color: #78847f; font-size: 11px; }
+    .footer-row { display: flex; justify-content: space-between; gap: 24px; }
+
+    @media (max-width: 850px) {
+      .hero, .showcase, .safety { grid-template-columns: 1fr; }
+      .hero { gap: 44px; padding-top: 64px; }
+      .trust-strip { grid-template-columns: 1fr 1fr; }
+      .trust-strip div:nth-child(2) { border-right: 0; }
+      .trust-strip div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .steps { grid-template-columns: 1fr; }
+      .step { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+      .step:last-child { border-bottom: 0; }
+      .downloads { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 570px) {
+      .shell { width: min(100% - 26px, 1120px); }
+      .nav { min-height: 66px; }
+      .nav-links a:first-child { display: none; }
+      .hero { padding: 50px 0 42px; }
+      h1 { font-size: 47px; }
+      section { padding: 64px 0; }
+      .trust-strip { grid-template-columns: 1fr; }
+      .trust-strip div { border-right: 0; border-bottom: 1px solid var(--line); }
+      .trust-strip div:last-child { border-bottom: 0; }
+      .shot img { min-height: 290px; }
+      .feature-card, .download-card, .safety { padding: 25px; }
+      .tooltip-demo { padding: 23px 18px; }
+      .rating-row { grid-template-columns: 38px 1fr; }
+      .numbers { grid-column: 2; }
+      .footer-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav shell">
+    <a class="brand" href="#top" aria-label="Nightslayer Rating home"><span class="mark"><span>N</span></span><span>Nightslayer Rating</span></a>
+    <nav class="nav-links" aria-label="Page links">
+      <a href="../">TBC setup site</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/noahbsark/tbc-addon-setup/tree/main/nightslayer-rating/source">Source</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="hero shell">
+      <div>
+        <p class="eyebrow">TBC Anniversary · Nightslayer US</p>
+        <h1>Know the rating <em>before you invite.</em></h1>
+        <p class="lede">Hover a player in Blizzard's Group Finder and see their current and highest recorded 2v2, 3v3, and 5v5 arena ratings—right in the normal tooltip.</p>
+        <div class="actions">
+          <a class="button" href="downloads/NightslayerRating-1.0.0-Windows.zip" download>Download for Windows <span aria-hidden="true">↓</span></a>
+          <a class="button secondary" href="#downloads">Other download</a>
+        </div>
+        <p class="fine">Version 1.0.0 · Free · Windows 10/11 · No account or API key</p>
+      </div>
+
+      <aside class="tooltip-demo" aria-label="Example rating tooltip for Reefey">
+        <div class="player">Reefey</div>
+        <div class="realm">Nightslayer · Arena rating</div>
+        <div class="rule"></div>
+        <div class="rating-row"><span class="bracket">2v2</span><span class="label">Current / High</span><span class="numbers">1,962 / <strong>2,540</strong></span></div>
+        <div class="rating-row"><span class="bracket">3v3</span><span class="label">Current / High</span><span class="numbers">1,702 / <strong>2,528</strong></span></div>
+        <div class="rating-row"><span class="bracket">5v5</span><span class="label">Current / High</span><span class="numbers">2,300 / <strong>2,408</strong></span></div>
+        <p class="source">Data source: ironforge.pro · Example record included</p>
+      </aside>
+    </div>
+
+    <div class="trust-strip shell" aria-label="Addon facts">
+      <div><strong>8,077</strong><span>Nightslayer players pre-cached</span></div>
+      <div><strong>3</strong><span>Arena brackets in each tooltip</span></div>
+      <div><strong>30 min</strong><span>Automatic refresh schedule</span></div>
+      <div><strong>0</strong><span>Logins, keys, or game automation</span></div>
+    </div>
+
+    <section class="shell" aria-labelledby="how-title">
+      <div class="section-head">
+        <p class="eyebrow">Built for Group Finder</p>
+        <h2 id="how-title">The context you wanted, where you wanted it.</h2>
+        <p>The addon adds ratings to the tooltip you already use. It does not replace Group Finder or add another window.</p>
+      </div>
+
+      <div class="showcase">
+        <figure class="shot">
+          <img src="group-finder.png" alt="Blizzard's TBC Anniversary Group Finder with a player tooltip open" width="702" height="632">
+        </figure>
+        <div class="feature-card">
+          <h3>Automatic after one setup</h3>
+          <div class="feature"><b>1</b><div><strong>Current ratings</strong><p>The updater refreshes the Nightslayer leaderboard cache in the background.</p></div></div>
+          <div class="feature"><b>2</b><div><strong>Exact lifetime highs</strong><p>Names you encounter are queued for a focused IronForge profile lookup after WoW saves on logout.</p></div></div>
+          <div class="feature"><b>3</b><div><strong>Honest fallback</strong><p>Until an exact lookup finishes, seasonal data is clearly labeled “Best cached*” instead of being presented as exact.</p></div></div>
+          <div class="feature"><b>4</b><div><strong>Quiet updates</strong><p>No updater window during normal operation. Refreshed data appears next login or after <code>/reload</code>.</p></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="shell" id="install" aria-labelledby="install-title">
+      <div class="section-head">
+        <p class="eyebrow">One-time setup</p>
+        <h2 id="install-title">Install it in three steps.</h2>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="step-number">01</span><h3>Close WoW</h3><p>Exit TBC Anniversary completely so Windows can place the addon safely.</p></div>
+        <div class="step"><span class="step-number">02</span><h3>Extract the ZIP</h3><p>Right-click the downloaded file, choose “Extract All,” then open the extracted folder.</p></div>
+        <div class="step"><span class="step-number">03</span><h3>Run Install.cmd</h3><p>The installer normally finds <code>_anniversary_</code> itself. Start WoW and hover a Group Finder name.</p></div>
+      </div>
+    </section>
+
+    <section class="shell" id="downloads" aria-labelledby="download-title">
+      <div class="section-head">
+        <p class="eyebrow">Downloads</p>
+        <h2 id="download-title">Choose your install.</h2>
+        <p>The automatic Windows bundle is the intended experience. The addon-only download is provided for people who prefer to manage files themselves.</p>
+      </div>
+
+      <div class="downloads">
+        <article class="download-card recommended">
+          <span class="tag">RECOMMENDED</span>
+          <h3>Windows automatic bundle</h3>
+          <p>Addon, installer, background updater, manual update shortcut, documentation, and uninstaller.</p>
+          <ul><li>Automatic rating refreshes</li><li>Exact highs for encountered names</li><li>One-click uninstall included</li></ul>
+          <a class="button" href="downloads/NightslayerRating-1.0.0-Windows.zip" download>Download v1.0.0 · 161 KB <span aria-hidden="true">↓</span></a>
+        </article>
+
+        <article class="download-card">
+          <span class="tag">ADVANCED</span>
+          <h3>Addon only</h3>
+          <p>Just the <code>NightslayerRating</code> addon folder and the rating snapshot packaged with this release.</p>
+          <ul><li>Manual Interface/AddOns install</li><li>No Windows scheduled task</li><li>Ratings will not refresh automatically</li></ul>
+          <a class="button secondary" href="downloads/NightslayerRating-1.0.0-AddonOnly.zip" download>Download addon only · 154 KB <span aria-hidden="true">↓</span></a>
+        </article>
+      </div>
+    </section>
+
+    <section class="shell">
+      <div class="safety">
+        <div>
+          <p class="eyebrow">Transparent by design</p>
+          <h2>Readable code. Reversible install.</h2>
+          <p>This is an unsigned community package, so Windows may show a security warning. You can inspect every script before running it and remove everything with <code>Uninstall.cmd</code>.</p>
+          <div class="source-links">
+            <a href="https://github.com/noahbsark/tbc-addon-setup/tree/main/nightslayer-rating/source">Browse all source files</a>
+            <a href="checksums.txt">View SHA-256 checksums</a>
+            <a href="https://ironforge.pro/anniversary/player/Nightslayer/Reefey/">Example IronForge profile</a>
+          </div>
+        </div>
+        <div>
+          <ul>
+            <li>No account credentials or API keys.</li>
+            <li>No reading game memory, controlling WoW, or automating gameplay.</li>
+            <li>The updater reads only this addon's SavedVariables to find public character names encountered in Group Finder.</li>
+            <li>Local cache and logs stay in <code>%LOCALAPPDATA%\NightslayerRating</code>.</li>
+            <li>IronForge can lag the live game, so the tooltip reflects the newest data IronForge publishes.</li>
+          </ul>
+          <p><strong>Windows bundle SHA-256</strong><br><code>041ceda6ee97d0de7535b48a440d49e33e47185184405502788e99654ba4e33c</code></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-row shell">
+      <span>Nightslayer Rating v1.0.0 · Free community addon</span>
+      <span>Not affiliated with Blizzard Entertainment or IronForge</span>
+    </div>
+  </footer>
+</body>
+</html>
