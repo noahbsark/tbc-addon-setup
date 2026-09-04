@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the public, pseudonymous Nightslayer Rating snapshot.
 
-The published file contains rating maps keyed by a deterministic two-part hash.
+The published file contains rating maps keyed by a deterministic four-part hash.
 Raw character names are used transiently while reading IronForge responses but
 are never written to the snapshot or logs.
 """
