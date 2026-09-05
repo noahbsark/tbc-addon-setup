@@ -18,7 +18,9 @@ $SharedSnapshotUrl = 'https://github.com/noahbsark/tbc-addon-setup/releases/down
 $SharedSnapshotMaxCompressedBytes = 10485760
 $SharedSnapshotMaxJsonChars = 52428800
 $SharedSnapshotMaxPlayers = 100000
-$ProfileLimitPerRun = 25
+$ProfileLimitPerRun = 50
+$ProfileSuccessDelayMilliseconds = 500
+$ProfileErrorDelayMilliseconds = 3000
 $ProfileRefreshSeconds = 604800
 $RequestRetentionSeconds = 2592000
 $ExactCacheRetentionSeconds = 7776000
@@ -384,7 +386,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.6 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.2.7 (local WoW addon updater; adaptive-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -433,7 +435,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.6 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.2.7 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()
@@ -807,6 +809,7 @@ function Sync-QueuedProfiles {
             $transientErrors++
             Write-Log ('Skipped temporarily unavailable profile {0}-{1}: {2}' -f
                 $request.Name, $request.Realm, $_.Exception.Message)
+            Start-Sleep -Milliseconds $ProfileErrorDelayMilliseconds
             continue
         }
         $player = Get-PlayerRecord -Cache $Cache -Name $request.Name -Realm $request.Realm
@@ -816,6 +819,7 @@ function Sync-QueuedProfiles {
             $statusCode = [int](Get-ObjectProperty $profile 'statusCode')
             Write-Log ('Skipped temporarily unavailable profile {0}-{1}: HTTP {2}' -f
                 $request.Name, $request.Realm, $statusCode)
+            Start-Sleep -Milliseconds $ProfileErrorDelayMilliseconds
             continue
         }
 
@@ -823,7 +827,7 @@ function Sync-QueuedProfiles {
             $player.notFoundUntil = $now + 604800
             $missing++
             Write-Log ('No IronForge profile found for ' + $request.Name + '-' + $request.Realm)
-            Start-Sleep -Milliseconds 750
+            Start-Sleep -Milliseconds $ProfileSuccessDelayMilliseconds
             continue
         }
 
@@ -866,7 +870,7 @@ function Sync-QueuedProfiles {
         $player.notFoundUntil = 0
         $processed++
         Write-Log ('Fetched exact lifetime highs for ' + $player.name + '-' + $player.realm)
-        Start-Sleep -Milliseconds 1500
+        Start-Sleep -Milliseconds $ProfileSuccessDelayMilliseconds
     }
 
     Write-Log ('Exact-profile batch: fetched {0}, not found {1}, transient errors {2}.' -f

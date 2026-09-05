@@ -1,5 +1,11 @@
-NIGHTSLAYER RATING 1.2.6
+NIGHTSLAYER RATING 1.2.7
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.2.7
+---------------------
+- Each manual pass now processes up to 50 due profiles instead of 25.
+- Successful and missing-profile requests use a 0.5-second pacing delay.
+- Transient failures use a 3-second backoff before the batch continues.
 
 WHAT CHANGED IN 1.2.6
 ---------------------
@@ -94,7 +100,7 @@ outside the game and writes Data.lua, which WoW reads at login or /reload.
    from their local WTF folders. Names encountered in Group Finder, unit
    tooltips, battlegrounds, or whispers are saved in this addon's queue.
 4. After WoW saves encountered names during logout, exit, or /reload, the
-   companion asks IronForge for exact record ratings for up to 25 profiles/run.
+   companion asks IronForge for exact record ratings for up to 50 profiles/run.
 5. New data appears at the next login or /reload. A running WoW client cannot
    hot-load an externally changed addon file.
 

@@ -37,7 +37,7 @@ jobs:
 
           $source = Get-Content $updater -Raw
           foreach ($required in @(
-            '$ProfileLimitPerRun = 25',
+            '$ProfileLimitPerRun = 50',
             '[IO.FileShare]::ReadWrite',
             'existingPriority',
             'profileLookup = true'
