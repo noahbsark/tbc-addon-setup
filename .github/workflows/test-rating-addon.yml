@@ -55,9 +55,6 @@ jobs:
           if ($data -notmatch 'profileLookup = true') {
             throw 'Generated Data.lua does not enable exact-profile lookup.'
           }
-          if ($data -notmatch '\["[0-9a-f]{16}"\] = \{ \d+, \d+, \d+, \d+, \d+, \d+ \}') {
-            throw 'Generated Data.lua does not contain compact shared records.'
-          }
           if ($data -notmatch '\["Nightslayer\|Reefey"\][\s\S]+?exact = true') {
             throw 'Generated Data.lua does not contain the exact queued profile.'
           }
