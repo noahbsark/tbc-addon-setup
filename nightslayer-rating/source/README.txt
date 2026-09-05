@@ -1,5 +1,10 @@
-NIGHTSLAYER RATING 1.2.4
+NIGHTSLAYER RATING 1.2.5
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.2.5
+---------------------
+- Update Now.cmd now offers another updater pass after every run. Press any key
+  to process the next batch, or close the window when finished.
 
 WHAT CHANGED IN 1.2.4
 ---------------------

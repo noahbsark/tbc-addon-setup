@@ -384,7 +384,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.4 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.2.5 (local WoW addon updater; low-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -430,7 +430,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.4 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.2.5 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()

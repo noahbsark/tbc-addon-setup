@@ -8,6 +8,7 @@ if not exist "%UPDATER%" (
   pause
   exit /b 1
 )
+:run
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%UPDATER%"
 set "UPDATE_EXIT=%ERRORLEVEL%"
 echo.
@@ -16,5 +17,8 @@ if "%UPDATE_EXIT%"=="0" (
 ) else (
   echo Update failed. See %%LOCALAPPDATA%%\NightslayerRating\updater.log
 )
-pause
-exit /b %UPDATE_EXIT%
+echo.
+echo Press any key to run another update, or close this window to exit.
+pause >nul
+echo.
+goto run
