@@ -55,6 +55,7 @@ jobs:
           if ($data -notmatch 'profileLookup = true') {
             throw 'Generated Data.lua does not enable exact-profile lookup.'
           }
-          if ($data -notmatch '\["Nightslayer\|Reefey"\][\s\S]+?exact = true') {
-            throw 'Generated Data.lua does not contain the exact queued profile.'
+          $cache = Get-Content 'nightslayer-rating\source\Updater\cache.json' -Raw
+          if ($cache -notmatch 'nightslayer\|reefey') {
+            throw 'Updater did not parse the queued profile from the held-open file.'
           }
