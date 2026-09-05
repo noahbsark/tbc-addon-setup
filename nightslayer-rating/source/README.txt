@@ -1,5 +1,11 @@
-NIGHTSLAYER RATING 1.2.5
+NIGHTSLAYER RATING 1.2.6
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.2.6
+---------------------
+- A 5xx error or other transient failure for one IronForge profile no longer
+  aborts the batch. The updater skips it, continues, and saves other results.
+- Each pass reports fetched, missing, and transient-error profile counts.
 
 WHAT CHANGED IN 1.2.5
 ---------------------

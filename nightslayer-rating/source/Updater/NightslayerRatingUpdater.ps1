@@ -384,7 +384,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.5 (local WoW addon updater; low-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.2.6 (local WoW addon updater; low-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -399,8 +399,11 @@ function Invoke-IronForgeJson {
             if ($AllowNotFound -and $statusCode -eq 404) {
                 return $null
             }
-            if ($AllowServerError -and $statusCode -eq 500) {
-                return $null
+            if ($AllowServerError -and $statusCode -ge 500 -and $statusCode -le 599) {
+                return [pscustomobject]@{
+                    __nsrTransientError = $true
+                    statusCode = $statusCode
+                }
             }
 
             if ($attempt -eq ($delays.Count - 1)) {
@@ -430,7 +433,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.5 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.2.6 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()
@@ -793,14 +796,32 @@ function Sync-QueuedProfiles {
         $candidates.Count, ($requests.Count - $candidates.Count))
 
     $processed = 0
+    $missing = 0
+    $transientErrors = 0
     foreach ($request in @($candidates | Select-Object -First $ProfileLimitPerRun)) {
         $encodedRealm = [Uri]::EscapeDataString([string]$request.Realm)
         $encodedName = [Uri]::EscapeDataString([string]$request.Name)
-        $profile = Invoke-IronForgeJson -Path ('anniversary/player/{0}/{1}' -f $encodedRealm, $encodedName) -AllowNotFound
+        try {
+            $profile = Invoke-IronForgeJson -Path ('anniversary/player/{0}/{1}' -f $encodedRealm, $encodedName) -AllowNotFound -AllowServerError
+        } catch {
+            $transientErrors++
+            Write-Log ('Skipped temporarily unavailable profile {0}-{1}: {2}' -f
+                $request.Name, $request.Realm, $_.Exception.Message)
+            continue
+        }
         $player = Get-PlayerRecord -Cache $Cache -Name $request.Name -Realm $request.Realm
+
+        if ([bool](Get-ObjectProperty $profile '__nsrTransientError')) {
+            $transientErrors++
+            $statusCode = [int](Get-ObjectProperty $profile 'statusCode')
+            Write-Log ('Skipped temporarily unavailable profile {0}-{1}: HTTP {2}' -f
+                $request.Name, $request.Realm, $statusCode)
+            continue
+        }
 
         if ($null -eq $profile) {
             $player.notFoundUntil = $now + 604800
+            $missing++
             Write-Log ('No IronForge profile found for ' + $request.Name + '-' + $request.Realm)
             Start-Sleep -Milliseconds 750
             continue
@@ -847,6 +868,9 @@ function Sync-QueuedProfiles {
         Write-Log ('Fetched exact lifetime highs for ' + $player.name + '-' + $player.realm)
         Start-Sleep -Milliseconds 1500
     }
+
+    Write-Log ('Exact-profile batch: fetched {0}, not found {1}, transient errors {2}.' -f
+        $processed, $missing, $transientErrors)
 
     $exactCutoff = $now - $ExactCacheRetentionSeconds
     foreach ($key in @($Cache.players.Keys)) {
