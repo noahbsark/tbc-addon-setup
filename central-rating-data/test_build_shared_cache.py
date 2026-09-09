@@ -64,7 +64,7 @@ class SharedCacheTests(unittest.TestCase):
         serialized = json.dumps(snapshot, ensure_ascii=False)
         self.assertNotIn("Twinname", serialized)
         self.assertNotIn("Ignored", serialized)
-        self.assertEqual(snapshot["version"], 5)
+        self.assertEqual(snapshot["version"], 6)
         self.assertEqual(snapshot["keyAlgorithm"], "nsr-h4-v1")
 
     def test_hash_vector_and_deterministic_gzip(self):
@@ -95,15 +95,35 @@ class SharedCacheTests(unittest.TestCase):
             self.assertIn("sharedPlayers", lua)
             self.assertIn("profileLookup = false", lua)
 
-    def test_lua_players_use_compact_six_rating_rows(self):
+    def test_lua_rows_append_history_without_changing_legacy_slots(self):
         snapshot = MODULE.build_snapshot(FakeClient())
         key = MODULE.lookup_hash("Nightslayer", "Twinname")
         lua = MODULE.render_lua(snapshot)
         self.assertIn(
-            f'["{key}"] = {{ 1502, 1503, 1505, 1502, 1503, 1505 }}',
+            f'["{key}"] = {{ 1502, 1503, 1505, 1502, 1503, 1505, 0, 0, 0 }}',
             lua,
         )
         self.assertNotIn("exact = false", lua)
+
+    def test_season2_is_preserved_separately_from_current_and_observed(self):
+        class SeasonsClient:
+            def get_json(self, path, *, allow_missing=False):
+                season = int(path.split('/')[2])
+                if season == 4:
+                    return None
+                return {"updated": 123000, "data": [
+                    {"server": "Nightslayer", "name": "Example", "rating": {1: 2500, 2: 2026, 3: 1800}[season]},
+                    {"server": "Nightslayer", "name": "Invalid", "rating": 20000},
+                ]}
+
+        snapshot = MODULE.build_snapshot(SeasonsClient())
+        row = snapshot["players"][MODULE.lookup_hash("Nightslayer", "Example")]
+        self.assertEqual(row["current"]["2"], 1800)
+        self.assertEqual(row["bestSeen"]["2"], 2500)
+        self.assertEqual(row["season2"]["2"], 2026)
+        self.assertNotIn("season2Best", row)  # A final rating cannot establish a peak.
+        self.assertEqual(len(snapshot["players"]), 1)
+        self.assertEqual(MODULE.lua_compact_player(row), "{ 1800, 1800, 1800, 2500, 2500, 2500, 2026, 2026, 2026 }")
 
     def test_hash_collision_fails_closed(self):
         with mock.patch.object(MODULE, "lookup_hash", return_value="0000000000000000"):

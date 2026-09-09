@@ -6,6 +6,8 @@ on:
     paths:
       - ".github/workflows/test-rating-addon.yml"
       - "nightslayer-rating/source/**"
+      - "nightslayer-rating/tests/**"
+      - "central-rating-data/**"
 
 permissions:
   contents: read
@@ -19,30 +21,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Parse and validate Windows updater
+      - name: Test Windows PowerShell 5.1 updater behavior
         shell: powershell
-        run: |
-          $updater = 'nightslayer-rating\source\Updater\NightslayerRatingUpdater.ps1'
-          $tokens = $null
-          $errors = $null
-          [void][Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path $updater),
-            [ref]$tokens,
-            [ref]$errors
-          )
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_ }
-            throw 'Updater PowerShell syntax validation failed.'
-          }
+        run: ./nightslayer-rating/tests/test_updater.ps1
 
-          $source = Get-Content $updater -Raw
-          foreach ($required in @(
-            '$ProfileLimitPerRun = 50',
-            '[IO.FileShare]::ReadWrite',
-            'existingPriority',
-            'profileLookup = true'
-          )) {
-            if (-not $source.Contains($required)) {
-              throw "Updater is missing required behavior: $required"
-            }
-          }
+  addon-and-publisher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install Lua 5.1
+        run: sudo apt-get update -qq && sudo apt-get install -y lua5.1
+      - name: Test tooltip hooks and rating boundaries
+        run: lua5.1 nightslayer-rating/tests/test_addon.lua
+      - name: Test shared season data
+        run: python -m unittest central-rating-data/test_build_shared_cache.py

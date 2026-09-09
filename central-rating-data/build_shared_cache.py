@@ -93,7 +93,7 @@ class ApiClient:
 
 
 def new_player() -> dict[str, dict[str, int]]:
-    return {"current": {}, "bestSeen": {}}
+    return {"current": {}, "bestSeen": {}, "season2": {}}
 
 
 def discover_seasons(client: ApiClient, payloads: dict[tuple[int, int], Any]) -> list[int]:
@@ -148,7 +148,7 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
                     rating = int(row.get("rating", 0))
                 except (TypeError, ValueError):
                     rating = 0
-                if not realm or not valid_player_name(name) or rating <= 0:
+                if not realm or not valid_player_name(name) or not 1 <= rating <= 10000:
                     continue
 
                 key = lookup_hash(realm, name)
@@ -161,6 +161,10 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
                 seen_by_realm[realm].add(key)
                 player = players.setdefault(key, new_player())
                 bracket_key = str(bracket)
+                if season == 2:
+                    player["season2"][bracket_key] = max(
+                        int(player["season2"].get(bracket_key, 0)), rating
+                    )
                 if season == current_season:
                     player["current"][bracket_key] = max(
                         int(player["current"].get(bracket_key, 0)), rating
@@ -172,7 +176,7 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
     ordered_players = {key: players[key] for key in sorted(players)}
     counts = {realm: len(keys) for realm, keys in seen_by_realm.items()}
     return {
-        "version": 5,
+        "version": 6,
         "keyAlgorithm": HASH_ALGORITHM,
         "generated": generated,
         "source": "ironforge.pro",
@@ -195,11 +199,13 @@ def lua_rating_map(values: dict[str, int]) -> str:
 
 
 def lua_compact_player(player: dict[str, dict[str, int]]) -> str:
-    """Render current 2/3/5 then best 2/3/5 as one compact Lua array."""
+    """Append S2 2/3/5 ratings after the six legacy current/observed slots."""
     current = player.get("current", {})
     best = player.get("bestSeen", {})
     ratings = [int(current.get(str(bracket), 0)) for bracket in BRACKETS]
     ratings.extend(int(best.get(str(bracket), 0)) for bracket in BRACKETS)
+    season2 = player.get("season2", {})
+    ratings.extend(int(season2.get(str(bracket), 0)) for bracket in BRACKETS)
     return "{ " + ", ".join(str(max(0, rating)) for rating in ratings) + " }"
 
 

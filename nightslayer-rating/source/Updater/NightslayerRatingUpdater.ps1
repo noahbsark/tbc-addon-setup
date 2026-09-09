@@ -174,7 +174,7 @@ function Convert-SharedRatingMap {
 
 function New-Cache {
     return @{
-        version = 5
+        version = 6
         currentSeason = 3
         syncedSeasons = @()
         lastLeaderboardUpdated = 0
@@ -208,6 +208,11 @@ function Read-Cache {
         if ($rawVersion -ge 3 -and $null -ne $synced) {
             $cache.syncedSeasons = @($synced | ForEach-Object { [int]$_ })
         }
+        if ($rawVersion -lt 6) {
+            # Old caches discarded the season of historical ratings. Re-fetch
+            # S2 during direct fallback instead of relabeling bestSeen as S2.
+            $cache.syncedSeasons = @($cache.syncedSeasons | Where-Object { $_ -ne 2 })
+        }
 
         $sharedGenerated = Get-ObjectProperty $raw 'sharedGenerated'
         if ($null -ne $sharedGenerated) {
@@ -235,6 +240,9 @@ function Read-Cache {
                 $record.current = Convert-RatingMap (Get-ObjectProperty $value 'current')
                 $record.bestSeen = Convert-RatingMap (Get-ObjectProperty $value 'bestSeen')
                 $record.exactBest = Convert-RatingMap (Get-ObjectProperty $value 'exactBest')
+                $record.season2 = Convert-RatingMap (Get-ObjectProperty $value 'season2')
+                $record.season2Best = Convert-RatingMap (Get-ObjectProperty $value 'season2Best')
+                $record.season2Fetched = [bool](Get-ObjectProperty $value 'season2Fetched')
                 $record.exactFetchedAt = [int64]((Get-ObjectProperty $value 'exactFetchedAt') -as [int64])
                 $record.lastSeen = [int64]((Get-ObjectProperty $value 'lastSeen') -as [int64])
                 $record.notFoundUntil = [int64]((Get-ObjectProperty $value 'notFoundUntil') -as [int64])
@@ -253,6 +261,7 @@ function Read-Cache {
                     $cache.sharedPlayers[$hash] = @{
                         current = Convert-RatingMap (Get-ObjectProperty $value 'current')
                         bestSeen = Convert-RatingMap (Get-ObjectProperty $value 'bestSeen')
+                        season2 = Convert-RatingMap (Get-ObjectProperty $value 'season2')
                     }
                 }
             }
@@ -359,6 +368,9 @@ function Get-PlayerRecord {
             current = @{}
             bestSeen = @{}
             exactBest = @{}
+            season2 = @{}
+            season2Best = @{}
+            season2Fetched = $false
             exactFetchedAt = 0
             lastSeen = 0
             notFoundUntil = 0
@@ -529,10 +541,11 @@ function Sync-SharedSnapshot {
         $value = $property.Value
         $current = Convert-SharedRatingMap (Get-ObjectProperty $value 'current')
         $bestSeen = Convert-SharedRatingMap (Get-ObjectProperty $value 'bestSeen')
-        if ($current.Count -eq 0 -and $bestSeen.Count -eq 0) {
+        $season2 = Convert-SharedRatingMap (Get-ObjectProperty $value 'season2')
+        if ($current.Count -eq 0 -and $bestSeen.Count -eq 0 -and $season2.Count -eq 0) {
             continue
         }
-        $newSharedPlayers[$hash] = @{ current = $current; bestSeen = $bestSeen }
+        $newSharedPlayers[$hash] = @{ current = $current; bestSeen = $bestSeen; season2 = $season2 }
         $merged++
     }
 
@@ -555,10 +568,14 @@ function Sync-SharedSnapshot {
             continue
         }
         $sharedCurrent = $newSharedPlayers[$hash].current
+        $sharedSeason2 = $newSharedPlayers[$hash].season2
         foreach ($bracket in @(2, 3, 5)) {
             $key = [string]$bracket
             if ($sharedCurrent.ContainsKey($key)) {
                 $player.current[$key] = [int]$sharedCurrent[$key]
+            }
+            if ($sharedSeason2.ContainsKey($key)) {
+                $player.season2[$key] = [int]$sharedSeason2[$key]
             }
         }
     }
@@ -575,6 +592,9 @@ function Sync-SharedSnapshot {
         }
     }
     $Cache.syncedSeasons = $(if ($season -gt 1) { @(1..($season - 1)) } else { @() })
+    if ($version -lt 6) {
+        $Cache.syncedSeasons = @($Cache.syncedSeasons | Where-Object { $_ -ne 2 })
+    }
     Write-Log ('Shared snapshot: loaded {0} pseudonymous Nightslayer and Dreamscythe rows.' -f $merged)
     return $true
 }
@@ -638,6 +658,9 @@ function Sync-LeaderboardSeason {
             $player.lastSeen = $now
             if ($IsCurrent) {
                 $player.current[[string]$bracket] = $rating
+            }
+            if ($Season -eq 2) {
+                $player.season2[[string]$bracket] = $rating
             }
 
             $previousBest = 0
@@ -789,7 +812,8 @@ function Sync-QueuedProfiles {
         if ($notFoundUntil -gt $now) {
             continue
         }
-        if ($lastExact -le 0 -or ($now - $lastExact) -ge $ProfileRefreshSeconds) {
+        if ($lastExact -le 0 -or ($now - $lastExact) -ge $ProfileRefreshSeconds -or
+            -not [bool]$player.season2Fetched) {
             $candidates += $request
         }
     }
@@ -853,6 +877,25 @@ function Sync-QueuedProfiles {
                 }
             }
         }
+
+        # A per-season 'top' is different from the all-time bracket_best. Never
+        # substitute a final leaderboard rating for a missing season peak.
+        $season2Data = Get-ObjectProperty $profile 'season2'
+        foreach ($bracket in @(2, 3, 5)) {
+            $key = [string]$bracket
+            $bracketData = Get-ObjectProperty $season2Data $key
+            $rating = 0
+            if ([int]::TryParse([string](Get-ObjectProperty $bracketData 'rating'), [ref]$rating) -and
+                $rating -ge 1 -and $rating -le 10000) {
+                $player.season2[$key] = $rating
+            }
+            $peak = 0
+            if ([int]::TryParse([string](Get-ObjectProperty $bracketData 'top'), [ref]$peak) -and
+                $peak -ge 1 -and $peak -le 10000 -and $peak -ge $rating) {
+                $player.season2Best[$key] = $peak
+            }
+        }
+        $player.season2Fetched = $true
 
         $seasonData = Get-ObjectProperty $profile ('season' + [string]$Cache.currentSeason)
         $player.current = @{}
@@ -930,7 +973,7 @@ function Format-LuaSharedPlayer {
     param($Player)
 
     $ratings = @()
-    foreach ($mapName in @('current', 'bestSeen')) {
+    foreach ($mapName in @('current', 'bestSeen', 'season2')) {
         $map = Get-ObjectProperty $Player $mapName
         foreach ($bracket in @(2, 3, 5)) {
             $ratings += Get-CachedRating -Map $map -Bracket $bracket
@@ -1016,6 +1059,9 @@ function Write-LuaData {
         [void]$builder.AppendLine(('            realm = "{0}",' -f $escapedRealm))
         [void]$builder.AppendLine(('            current = {0},' -f (Format-LuaRatingMap $player.current)))
         [void]$builder.AppendLine(('            best = {0},' -f (Format-LuaRatingMap $best)))
+        [void]$builder.AppendLine(('            exactBest = {0},' -f (Format-LuaRatingMap $player.exactBest)))
+        [void]$builder.AppendLine(('            season2 = {0},' -f (Format-LuaRatingMap $player.season2)))
+        [void]$builder.AppendLine(('            season2Best = {0},' -f (Format-LuaRatingMap $player.season2Best)))
         [void]$builder.AppendLine(('            exact = {0},' -f $(if ($isExact) { 'true' } else { 'false' })))
         [void]$builder.AppendLine('        },')
     }

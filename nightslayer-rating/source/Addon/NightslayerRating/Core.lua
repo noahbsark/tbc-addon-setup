@@ -1,4 +1,4 @@
-local ADDON_NAME = ...
+local ADDON_NAME, ns = ...
 
 local DEFAULT_REALM = "Nightslayer"
 local SUPPORTED_REALMS = {
@@ -13,18 +13,7 @@ local HASH_MODULI = { 65521, 65519, 65497, 65479 }
 local HASH_BASES = { 131, 137, 139, 149 }
 local SHARED_CURRENT_INDEX = { [2] = 1, [3] = 2, [5] = 3 }
 local SHARED_BEST_INDEX = { [2] = 4, [3] = 5, [5] = 6 }
-
--- These are neutral visual bands, not official arena titles. Official titles
--- depend on ladder rank at the end of a season and cannot be inferred from a
--- historical rating number alone.
-local RATING_BANDS = {
-    { minimum = 2400, label = "Elite", hex = "ff8000" },
-    { minimum = 2100, label = "Excellent", hex = "a335ee" },
-    { minimum = 1800, label = "Strong", hex = "0070dd" },
-    { minimum = 1500, label = "Competitive", hex = "1eff00" },
-    { minimum = 1, label = "Rated", hex = "ffffff" },
-}
-local INACTIVE_BAND = { label = "Inactive", hex = "aaaaaa" }
+local SHARED_SEASON2_INDEX = { [2] = 7, [3] = 8, [5] = 9 }
 
 local data = NightslayerRatingData or {
     meta = { realm = DEFAULT_REALM, region = "US", season = 0, generated = 0 },
@@ -341,12 +330,13 @@ local function LookupRecord(name, realm)
     end
 
     local localRecord = playerIndex[key] or lowerIndex[key]
-    if localRecord and localRecord.exact == true then
-        return localRecord
-    end
-
     local sharedKey = SharedLookupKey(name, realm)
     local sharedRecord = sharedKey and data.sharedPlayers and data.sharedPlayers[sharedKey]
+    if localRecord and localRecord.exact == true then
+        -- An older exact profile can still use the new shared S2 final values.
+        localRecord.sharedSeason2 = sharedRecord
+        return localRecord
+    end
     return sharedRecord or localRecord
 end
 
@@ -372,7 +362,10 @@ local function BestRating(record, bracket)
     return index and record[index] or nil
 end
 
-local function ExactRating(record)
+local function ExactRating(record, bracket)
+    if bracket and type(record) == "table" and type(record.exactBest) == "table" then
+        return (tonumber(record.exactBest[bracket] or record.exactBest[tostring(bracket)]) or 0) > 0
+    end
     return type(record) == "table" and record.exact == true
 end
 
@@ -388,32 +381,52 @@ local function RatingText(value)
     return tostring(math.floor(value + 0.5))
 end
 
-local function GetRatingBand(value)
-    local rating = tonumber(value) or 0
-    if rating <= 0 then
-        return INACTIVE_BAND
-    end
-
-    for _, band in ipairs(RATING_BANDS) do
-        if rating >= band.minimum then
-            return band
-        end
-    end
-
-    return INACTIVE_BAND
+local function GetRatingBand(value, bracket, season)
+    return ns.GetRatingBand(value, bracket, season or (data.meta and data.meta.season), data.meta and data.meta.region)
 end
 
 local function ColorText(band, text)
     return "|cff" .. band.hex .. tostring(text) .. "|r"
 end
 
-local function ColoredRating(value)
-    return ColorText(GetRatingBand(value), RatingText(value))
+local function ColoredRating(value, bracket, season)
+    return ColorText(GetRatingBand(value, bracket, season), RatingText(value))
 end
 
-local function RatingBandLabel(current)
-    local band = GetRatingBand(current)
+local function NeutralRating(value)
+    local hex = (tonumber(value) or 0) > 0 and "ffffff" or "aaaaaa"
+    return ColorText({ hex = hex }, RatingText(value))
+end
+
+local function RatingBandLabel(current, bracket)
+    local band = GetRatingBand(current, bracket)
     return ColorText(band, band.label)
+end
+
+local function Season2HistoryText(record, bracket)
+    if type(record) ~= "table" then
+        return nil
+    end
+    local index = SHARED_SEASON2_INDEX[bracket]
+    local ratings = record.season2 or {}
+    local peaks = record.season2Best or {}
+    local final = tonumber(ratings[bracket] or ratings[tostring(bracket)] or record[index]) or 0
+    if final <= 0 and record.sharedSeason2 then
+        final = tonumber(record.sharedSeason2[index]) or 0
+    end
+    local peak = tonumber(peaks[bracket] or peaks[tostring(bracket)]) or 0
+    if final <= 0 and peak <= 0 then
+        return nil
+    end
+    local parts = {}
+    if final > 0 then
+        local label = (tonumber(data.meta and data.meta.season) or 0) > 2 and "S2 final " or "S2 rating "
+        parts[#parts + 1] = label .. ColoredRating(final, bracket, 2)
+    end
+    if peak > 0 then
+        parts[#parts + 1] = "S2 peak " .. ColoredRating(peak, bracket, 2)
+    end
+    return table.concat(parts, "   ")
 end
 
 local function ShowWhisperRating(fullName)
@@ -452,21 +465,25 @@ local function ShowWhisperRating(fullName)
     end
 
     local parts = {}
-    local exact = ExactRating(record)
     for _, bracket in ipairs(BRACKETS) do
+        local exact = ExactRating(record, bracket)
         local current = CurrentRating(record, bracket)
         local best = BestRating(record, bracket)
+        local history = Season2HistoryText(record, bracket)
         if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
             parts[#parts + 1] = string.format(
                 "%dv%d %s: %s current / %s %s%s",
                 bracket,
                 bracket,
-                RatingBandLabel(current),
-                ColoredRating(current),
-                ColoredRating(best),
+                RatingBandLabel(current, bracket),
+                ColoredRating(current, bracket),
+                NeutralRating(best),
                 exact and "record high" or "observed",
                 exact and "" or "*"
             )
+            if history then
+                parts[#parts] = parts[#parts] .. " / " .. history
+            end
         end
     end
 
@@ -511,42 +528,54 @@ local function AddRatingLines(tooltip, fullName, resultID)
         return
     end
 
-    local exact = ExactRating(record)
+    local hasObserved = false
+    local hasHistory = false
     local foundRating = false
 
     for _, bracket in ipairs(BRACKETS) do
+        local exact = ExactRating(record, bracket)
         local current = CurrentRating(record, bracket)
         local best = BestRating(record, bracket)
+        local history = Season2HistoryText(record, bracket)
 
         if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
             foundRating = true
+            hasObserved = hasObserved or (not exact and (tonumber(best) or 0) > 0)
             local bestLabel = exact and "Record " or "Observed "
             local suffix = exact and "" or "*"
             local left = string.format(
                 "%dv%d  %s",
                 bracket,
                 bracket,
-                RatingBandLabel(current)
+                RatingBandLabel(current, bracket)
             )
             local right = string.format(
                 "Current %s   %s%s%s",
-                ColoredRating(current),
+                ColoredRating(current, bracket),
                 bestLabel,
-                ColoredRating(best),
+                NeutralRating(best),
                 suffix
             )
             tooltip:AddDoubleLine(left, right, 0.35, 0.75, 1.00, 0.80, 0.80, 0.80)
+        end
+        if history then
+            foundRating = true
+            hasHistory = true
+            tooltip:AddDoubleLine(string.format("%dv%d history", bracket, bracket), history, 0.55, 0.55, 0.55, 0.80, 0.80, 0.80)
         end
     end
 
     if not foundRating then
         tooltip:AddLine("No tracked arena rating", 0.75, 0.75, 0.75)
-    elseif not exact then
+    elseif hasObserved then
         if AutomaticExactLookupAvailable() then
             tooltip:AddLine("* Exact lifetime high is queued", 0.55, 0.55, 0.55)
         else
             tooltip:AddLine("* Observed leaderboard value; not a lifetime peak", 0.55, 0.55, 0.55)
         end
+    end
+    if hasHistory then
+        tooltip:AddLine("S2 colors: US reference bands, not earned titles", 0.55, 0.55, 0.55)
     end
 
     local generated = data.meta and tonumber(data.meta.generated)
@@ -635,15 +664,19 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
             displayLines[#displayLines + 1] = { "Not in the packaged leaderboard cache", 0.55, 0.55, 0.55 }
         end
     else
-        local exact = ExactRating(record)
+        local hasObserved = false
+        local hasHistory = false
         local foundRating = false
 
         for _, bracket in ipairs(BRACKETS) do
+            local exact = ExactRating(record, bracket)
             local current = CurrentRating(record, bracket)
             local best = BestRating(record, bracket)
+            local history = Season2HistoryText(record, bracket)
 
             if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
                 foundRating = true
+                hasObserved = hasObserved or (not exact and (tonumber(best) or 0) > 0)
                 local bestLabel = exact and "Record" or "Observed"
                 local suffix = exact and "" or "*"
                 displayLines[#displayLines + 1] = {
@@ -651,10 +684,10 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
                         "|cff59bfff%dv%d|r  %s   Current %s   %s %s%s",
                         bracket,
                         bracket,
-                        RatingBandLabel(current),
-                        ColoredRating(current),
+                        RatingBandLabel(current, bracket),
+                        ColoredRating(current, bracket),
                         bestLabel,
-                        ColoredRating(best),
+                        NeutralRating(best),
                         suffix
                     ),
                     1.00,
@@ -662,11 +695,16 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
                     1.00,
                 }
             end
+            if history then
+                foundRating = true
+                hasHistory = true
+                displayLines[#displayLines + 1] = { string.format("%dv%d history   %s", bracket, bracket, history), 0.65, 0.65, 0.65 }
+            end
         end
 
         if not foundRating then
             displayLines[#displayLines + 1] = { "No tracked arena rating", 0.75, 0.75, 0.75 }
-        elseif not exact then
+        elseif hasObserved then
             displayLines[#displayLines + 1] = {
                 AutomaticExactLookupAvailable()
                     and "* Exact lifetime high is queued"
@@ -675,6 +713,9 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
                 0.55,
                 0.55,
             }
+        end
+        if hasHistory then
+            displayLines[#displayLines + 1] = { "S2 colors: US reference bands, not earned titles", 0.55, 0.55, 0.55 }
         end
     end
 
