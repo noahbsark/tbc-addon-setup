@@ -6,11 +6,32 @@ on:
     paths:
       - ".github/workflows/test-rating-addon.yml"
       - "nightslayer-rating/source/**"
+      - "nightslayer-rating/tests/**"
+      - "central-rating-data/**"
+  pull_request:
+    paths:
+      - ".github/workflows/test-rating-addon.yml"
+      - "nightslayer-rating/**"
+      - "central-rating-data/**"
 
 permissions:
   contents: read
 
 jobs:
+  lua-and-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test snapshot publisher
+        run: python -m unittest central-rating-data/test_build_shared_cache.py
+      - name: Test Lua 5.1 rating colors and addon entry points
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y lua5.1
+          lua5.1 nightslayer-rating/tests/test_rating_colors.lua
   windows-integration:
     runs-on: windows-latest
     timeout-minutes: 10
@@ -46,3 +67,7 @@ jobs:
               throw "Updater is missing required behavior: $required"
             }
           }
+
+      - name: Test updater cutoff and season behavior
+        shell: powershell
+        run: ./nightslayer-rating/tests/test_updater.ps1

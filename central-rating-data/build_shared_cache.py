@@ -16,6 +16,7 @@ import re
 import tempfile
 import time
 import unicodedata
+from email.utils import parsedate_to_datetime
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -30,9 +31,52 @@ HASH_ALGORITHM = "nsr-h4-v1"
 HASH_MODULI = (65_521, 65_519, 65_497, 65_479)
 HASH_BASES = (131, 137, 139, 149)
 USER_AGENT = (
-    "NightslayerRating/1.2.0 shared-cache publisher "
+    "NightslayerRating/1.3.0 shared-cache publisher "
     "(+https://github.com/noahbsark/tbc-addon-setup)"
 )
+FROZEN_CUTOFFS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "nightslayer-rating/source/Updater/Season2Cutoffs.json"
+)
+
+
+def parse_cutoffs(payload: Any, checked: int) -> dict[str, Any]:
+    """Read the same ordered five cutoff cards used by the IronForge UI."""
+    rows = payload.get("cutoff") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or len(rows) != 5:
+        raise ValueError("expected all five cutoff tiers")
+    thresholds = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, list) or len(row) < 2:
+            raise ValueError("invalid cutoff row")
+        label = str(row[1])
+        expected = ("Gladiator", "Gladiator", "Duelist", "Rival", "Challenger")[index]
+        if (index == 0 and not label.endswith(" Gladiator")) or (index > 0 and label != expected):
+            raise ValueError("unexpected cutoff tier order")
+        value = row[0]
+        if isinstance(value, bool) or not str(value).isdigit() or not 1 <= int(value) <= 10000:
+            raise ValueError("invalid cutoff rating")
+        thresholds.append(int(value))
+    if thresholds != sorted(thresholds, reverse=True):
+        raise ValueError("cutoffs must be descending")
+    updated = int(parsedate_to_datetime(payload["updated"]).timestamp())
+    if not 0 < updated <= checked + 3600:
+        raise ValueError("invalid cutoff timestamp")
+    return {"updated": updated, "checked": checked, "thresholds": thresholds}
+
+
+def build_cutoffs(client: ApiClient, season: int, checked: int) -> dict[str, Any]:
+    # Season 2 is frozen to the user's final US archive values. Never replace
+    # it with current-season data, even after a future season rollover.
+    cutoffs = json.loads(FROZEN_CUTOFFS_PATH.read_text(encoding="utf-8"))
+    for target in sorted({season, season - 1} - {0, 2}):
+        cutoffs[str(target)] = {}
+        for bracket in BRACKETS:
+            payload = client.get_json(f"anniversary/cutoffs/{target}/US/{bracket}/")
+            # A malformed response fails this publication; the stable release
+            # keeps its last good snapshot instead of publishing guessed colors.
+            cutoffs[str(target)][str(bracket)] = parse_cutoffs(payload, checked)
+    return cutoffs
 
 
 def ascii_lower(value: str) -> str:
@@ -93,7 +137,7 @@ class ApiClient:
 
 
 def new_player() -> dict[str, dict[str, int]]:
-    return {"current": {}, "bestSeen": {}}
+    return {"current": {}, "bestSeen": {}, "previous": {}}
 
 
 def discover_seasons(client: ApiClient, payloads: dict[tuple[int, int], Any]) -> list[int]:
@@ -165,6 +209,10 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
                     player["current"][bracket_key] = max(
                         int(player["current"].get(bracket_key, 0)), rating
                     )
+                if season == current_season - 1:
+                    player["previous"][bracket_key] = max(
+                        int(player["previous"].get(bracket_key, 0)), rating
+                    )
                 player["bestSeen"][bracket_key] = max(
                     int(player["bestSeen"].get(bracket_key, 0)), rating
                 )
@@ -172,12 +220,14 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
     ordered_players = {key: players[key] for key in sorted(players)}
     counts = {realm: len(keys) for realm, keys in seen_by_realm.items()}
     return {
-        "version": 5,
+        "version": 6,
         "keyAlgorithm": HASH_ALGORITHM,
         "generated": generated,
         "source": "ironforge.pro",
         "region": "US",
         "season": current_season,
+        "previousSeason": max(0, current_season - 1),
+        "cutoffs": build_cutoffs(client, current_season, generated),
         "realms": list(REALMS.values()),
         "leaderboardUpdated": leaderboard_updated,
         "counts": counts,
@@ -195,12 +245,27 @@ def lua_rating_map(values: dict[str, int]) -> str:
 
 
 def lua_compact_player(player: dict[str, dict[str, int]]) -> str:
-    """Render current 2/3/5 then best 2/3/5 as one compact Lua array."""
+    """Keep the legacy six ratings, then append previous-season 2/3/5."""
     current = player.get("current", {})
     best = player.get("bestSeen", {})
     ratings = [int(current.get(str(bracket), 0)) for bracket in BRACKETS]
     ratings.extend(int(best.get(str(bracket), 0)) for bracket in BRACKETS)
+    ratings.extend(int(player.get("previous", {}).get(str(bracket), 0)) for bracket in BRACKETS)
     return "{ " + ", ".join(str(max(0, rating)) for rating in ratings) + " }"
+
+
+def lua_cutoffs(cutoffs: dict[str, Any]) -> list[str]:
+    lines = ["    cutoffs = {"]
+    for season, brackets in sorted(cutoffs.items(), key=lambda item: int(item[0])):
+        lines.append(f"        [{int(season)}] = {{")
+        for bracket, entry in sorted(brackets.items()):
+            thresholds = ", ".join(str(int(value)) for value in entry["thresholds"])
+            lines.append(
+                f"            [{int(bracket)}] = {{ updated = {int(entry['updated'])}, "
+                f"thresholds = {{ {thresholds} }} }},"
+            )
+        lines.append("        },")
+    return lines + ["    },"]
 
 
 def render_lua(snapshot: dict[str, Any]) -> str:
@@ -213,6 +278,7 @@ def render_lua(snapshot: dict[str, Any]) -> str:
         '        realms = { "Nightslayer", "Dreamscythe" },',
         '        region = "US",',
         f"        season = {int(snapshot['season'])},",
+        f"        previousSeason = {int(snapshot.get('previousSeason', 0))},",
         f"        generated = {int(snapshot['generated'])},",
         f"        leaderboardUpdated = {int(snapshot['leaderboardUpdated'])},",
         f"        sharedGenerated = {int(snapshot['generated'])},",
@@ -223,8 +289,9 @@ def render_lua(snapshot: dict[str, Any]) -> str:
         "        },",
         '        source = "ironforge.pro via pseudonymous shared snapshot",',
         "    },",
-        "    sharedPlayers = {",
     ]
+    lines.extend(lua_cutoffs(snapshot.get("cutoffs", {})))
+    lines.append("    sharedPlayers = {")
     for key, player in snapshot.get("players", {}).items():
         lines.append(f'        ["{key}"] = {lua_compact_player(player)},')
     lines.extend(("    },", "    players = {},", "}", ""))

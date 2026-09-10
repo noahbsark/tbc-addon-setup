@@ -5,8 +5,16 @@ This directory contains the low-rate publisher for the addon's read-only arena-r
 - GitHub Actions refreshes Nightslayer and Dreamscythe leaderboard data hourly.
 - The stable `ratings-data` release contains `shared-cache.json.gz`, `shared-data.lua.gz`, and small metadata.
 - Shared rating rows are keyed by a deterministic four-part lookup hash. Raw character names are not written to the public snapshot or workflow logs.
-- Generated Lua uses one compact six-number row per character (current 2v2/3v3/5v5, then best-seen 2v2/3v3/5v5) to reduce in-game load time and memory.
+- Snapshot schema v6 appends the previous season's archived 2v2/3v3/5v5 ratings to the original six-number Lua row (current, then all-time best seen). The first six positions remain compatible with older addons.
+- `previousSeason` identifies those three compatibility values. The 1.3.1 UI does not display them; it shows Current and lifetime Peak, using frozen S2 cutoffs to color the latter. The snapshot includes US cutoff tables keyed by season and bracket, with the source's update timestamp and a separate fetch timestamp.
+- The publisher uses the same `/api/anniversary/cutoffs/{season}/US/{bracket}/` endpoint as IronForge's cutoff cards. The canonical frozen S2 values live in `../nightslayer-rating/source/Updater/Season2Cutoffs.json`; current cutoffs and future previous-season archives come from the API. Invalid or missing cutoff tiers fail publication, leaving the prior stable release intact.
 - Installed Windows companions can only download the snapshot. They receive no repository credential and cannot overwrite shared data.
 - Exact lifetime-high requests remain local: the companion reads this addon's own SavedVariables queue and contacts IronForge directly for recently encountered characters. Successful exact profiles refresh at most weekly.
 
 If the shared asset is unavailable, the companion falls back to the same low-rate IronForge requests it used before shared snapshots were introduced.
+
+The companion validates cutoff ordering, timestamps, and rating ranges, preserves the last valid values, and checks the direct cutoff source at most daily after a successful fetch when shared data is unavailable or stale. The addon identifies cutoff data older than 48 hours. Production snapshot publication is restricted to `main`; feature-branch tests cannot overwrite the shared release.
+
+To package a release, first build the snapshot with `build_shared_cache.py`, then run `python tools/package_rating_addon.py --snapshot PATH/TO/shared-cache.json.gz` from the repository root. This bundles the matching Lua code, snapshot, updater, and frozen cutoffs in both downloads and refreshes their checksums.
+
+Windows bundles also include `Updater/BundledSnapshot.json.gz`, built from the same JSON as the packaged Data.lua. The companion can initialize from this file without network access. It accepts legacy v4/v5 shared snapshots, preserves cutoff data when those formats omit it, and refuses to roll back newer cached ratings. Bracket refreshes retain valid data on HTTP errors or empty/malformed responses.
