@@ -1,5 +1,17 @@
-NIGHTSLAYER RATING 1.3.0
+NIGHTSLAYER RATING 1.3.1
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.3.1
+---------------------
+- Removed the S2 rating column. The display now shows Current and lifetime Peak
+  (Observed* until an exact lifetime high has been fetched).
+- Current uses the live current-season US bracket cutoffs. Peak/Observed uses
+  the fixed S2 cutoffs for its bracket as a color comparison.
+- The updater accepts the existing v4/v5 shared snapshot format as well as v6.
+- The Windows bundle includes a local snapshot for first-run source outages.
+- Failed future-season probes cannot advance the current season. HTTP 500 and
+  empty responses preserve the affected bracket's cached data while the rest
+  of the update continues. An empty failed refresh cannot overwrite Data.lua.
 
 WHAT CHANGED IN 1.3.0
 ---------------------
@@ -80,7 +92,7 @@ WHAT IT DOES
 Hover a player in Blizzard's Looking For Group / Group Finder panel, in the
 world, on a unit frame, or in a battleground. The tooltip gains color-coded
 IronForge 2v2, 3v3, and 5v5 rows showing current rating and, after an exact
-profile lookup, the record rating.
+profile lookup, the lifetime peak rating.
 
 When a character whispers you, or you whisper them, a private [NSR] line in
 your chat shows the same summary once per character per login. The other player
@@ -134,18 +146,19 @@ Bracket    Orange    Purple    Blue    Green    White
 3v3        2493      2269      1913    1662     1482
 5v5        2340      2166      1854    1640     1466
 
-The S2 value is the archived leaderboard rating, not an all-time or season peak.
-Current S3 cutoffs follow the source's updates through the shared publisher and
-Windows companion. All-time Record/Observed stays neutral because its season
-is unknown. New files become visible after login or /reload. A future season
-rollover changes the Current and previous-season labels using source metadata.
+Only Current and Peak are displayed; there is no S2 rating column. Peak is the
+lifetime bracket high, colored against the fixed S2 thresholds above. Observed*
+uses that same comparison while the exact lifetime lookup is pending. Current
+S3 cutoffs follow source updates through the shared publisher and Windows
+companion. New files become visible after login or /reload. A future season
+rollover changes Current while the Peak comparison remains fixed to S2.
 
 OPTIONAL COMMANDS
 -----------------
 /nsr                              Show cache status
 /nsr on                           Enable tooltip and chat additions
 /nsr off                          Disable tooltip and chat additions
-/nsr cutoffs                      Show US current/previous cutoff details
+/nsr cutoffs                      Show current/S2 comparison cutoff details
 /nsr lookup Reefey                Queue a Nightslayer character
 /nsr lookup Player-Dreamscythe    Queue a Dreamscythe character
 
