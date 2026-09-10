@@ -155,6 +155,12 @@ try {
     $stream.Dispose()
     Assert ((Read-CompressedSnapshot ([IO.File]::ReadAllBytes($BundledSnapshotPath))).version -eq 6) 'Bundled gzip did not decode'
 
+    $upgrade = New-Cache
+    $upgrade.sharedPlayers[$hash] = @{ current = @{ '2' = 2300 }; bestSeen = @{ '2' = 2900 }; previous = @{} }
+    Initialize-BundledSnapshot $upgrade
+    Assert ($upgrade.sharedPlayers[$hash].current['2'] -eq 2300) 'Bootstrap replaced existing upgrade ratings'
+    Assert ($upgrade.cutoffs['3']['2'].thresholds[0] -eq 2199) 'Legacy cache with players did not receive bundled current cutoffs'
+
     $legacy = @{
         version = 5; season = 3; region = 'US'; keyAlgorithm = 'nsr-h4-v1'
         generated = Get-UnixTime; leaderboardUpdated = Get-UnixTime

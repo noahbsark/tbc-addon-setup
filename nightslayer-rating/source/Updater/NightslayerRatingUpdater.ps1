@@ -557,12 +557,18 @@ function Read-CompressedSnapshot {
 function Initialize-BundledSnapshot {
     param([hashtable]$Cache)
 
-    if ($Cache.sharedPlayers.Count -gt 0 -or -not (Test-Path -LiteralPath $BundledSnapshotPath)) { return }
+    if (-not (Test-Path -LiteralPath $BundledSnapshotPath)) { return }
     try {
         if ((Get-Item -LiteralPath $BundledSnapshotPath).Length -gt $SharedSnapshotMaxCompressedBytes) {
             throw 'Bundled snapshot exceeded the size limit.'
         }
         $snapshot = Read-CompressedSnapshot ([IO.File]::ReadAllBytes($BundledSnapshotPath))
+        if ([string](Get-ObjectProperty $snapshot 'region') -ne $Region -or
+            [int](Get-ObjectProperty $snapshot 'version') -ne 6) { throw 'Invalid bundled snapshot format or region.' }
+        # Upgrades can already have player rows but no cutoff metadata. Seed
+        # missing cutoff tables without replacing those existing ratings.
+        Merge-Cutoffs -Cache $Cache -Object (Get-ObjectProperty $snapshot 'cutoffs')
+        if ($Cache.sharedPlayers.Count -gt 0) { return }
         [void](Import-SharedSnapshot -Cache $Cache -Snapshot $snapshot -SourceLabel 'Bundled snapshot')
     } catch {
         Write-Log ('Bundled snapshot unavailable; preserving existing data. ' + $_.Exception.Message)
