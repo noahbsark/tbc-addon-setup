@@ -1,5 +1,17 @@
-NIGHTSLAYER RATING 1.2.7
+NIGHTSLAYER RATING 1.3.0
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
+
+WHAT CHANGED IN 1.3.0
+---------------------
+- Current ratings use the current season's US cutoff estimates for their own
+  2v2, 3v3, or 5v5 bracket. The shared hourly refresh includes cutoff updates.
+- A separate S2 column shows the previous season's archived rating. Its colors
+  use the frozen final S2 US cutoffs shown below. Record/Observed remains the
+  all-time value and is neutral white because its season is unknown.
+- Tooltips and /nsr show the cutoff date and mark it stale after 48 hours.
+  /nsr cutoffs lists the current and previous-season thresholds for all brackets.
+- Invalid cutoff refreshes retain the last valid data. The updater migrates
+  older caches without discarding exact lifetime records.
 
 WHAT CHANGED IN 1.2.7
 ---------------------
@@ -109,15 +121,31 @@ to IronForge's bulk endpoints and continues working. A tooltip says "Observed*"
 until an exact profile lookup has completed and explains that this is only a
 leaderboard snapshot, never an exact lifetime high.
 
-Colors are a fixed visual guide: gray inactive, white rated, green competitive
-(1500+), blue strong (1800+), purple excellent (2100+), and orange elite (2400+).
-These labels are intentionally not official arena titles or achievement claims.
+Colors use US cutoff estimates separately for each season and bracket: orange
+Rank One range (Elite), purple Gladiator range (Excellent), blue Duelist range
+(Strong), green Rival range (Competitive), and white Challenger range (Rated).
+Positive ratings below Challenger are gray. Missing cutoffs use neutral white;
+zero or missing ratings are gray and display --. These ranges do not assert
+that a player earned an arena title or met the season's reward eligibility.
+
+Frozen S2 thresholds (inclusive; IronForge archive, August 31, 2026):
+Bracket    Orange    Purple    Blue    Green    White
+2v2        2803      2481      1944    1629     1458
+3v3        2493      2269      1913    1662     1482
+5v5        2340      2166      1854    1640     1466
+
+The S2 value is the archived leaderboard rating, not an all-time or season peak.
+Current S3 cutoffs follow the source's updates through the shared publisher and
+Windows companion. All-time Record/Observed stays neutral because its season
+is unknown. New files become visible after login or /reload. A future season
+rollover changes the Current and previous-season labels using source metadata.
 
 OPTIONAL COMMANDS
 -----------------
 /nsr                              Show cache status
 /nsr on                           Enable tooltip and chat additions
 /nsr off                          Disable tooltip and chat additions
+/nsr cutoffs                      Show US current/previous cutoff details
 /nsr lookup Reefey                Queue a Nightslayer character
 /nsr lookup Player-Dreamscythe    Queue a Dreamscythe character
 

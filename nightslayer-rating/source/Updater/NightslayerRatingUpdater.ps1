@@ -173,15 +173,116 @@ function Convert-SharedRatingMap {
 }
 
 function New-Cache {
-    return @{
-        version = 5
+    $cache = @{
+        version = 6
         currentSeason = 3
+        previousSeason = 2
+        cutoffs = @{}
         syncedSeasons = @()
         lastLeaderboardUpdated = 0
         sharedGenerated = 0
         sharedCounts = @{ Nightslayer = 0; Dreamscythe = 0 }
         sharedPlayers = @{}
         players = @{}
+    }
+    $frozen = Get-Content -LiteralPath (Join-Path $UpdaterDirectory 'Season2Cutoffs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    Merge-Cutoffs -Cache $cache -Object $frozen -Frozen
+    return $cache
+}
+
+function Convert-CutoffEntry {
+    param($Object)
+
+    $values = @(Get-ObjectProperty $Object 'thresholds')
+    if ($values.Count -ne 5) { return $null }
+    $thresholds = @()
+    $previous = 10000
+    foreach ($value in $values) {
+        $rating = 0
+        if (-not [int]::TryParse([string]$value, [ref]$rating) -or
+            $rating -lt 1 -or $rating -gt $previous) { return $null }
+        $thresholds += $rating
+        $previous = $rating
+    }
+    $updated = 0L
+    if (-not [int64]::TryParse([string](Get-ObjectProperty $Object 'updated'), [ref]$updated) -or
+        $updated -le 0 -or $updated -gt ((Get-UnixTime) + 3600)) { return $null }
+    $checked = 0L
+    [void][int64]::TryParse([string](Get-ObjectProperty $Object 'checked'), [ref]$checked)
+    if ($checked -lt 0 -or $checked -gt ((Get-UnixTime) + 3600)) { return $null }
+    return @{ updated = $updated; checked = $checked; thresholds = $thresholds }
+}
+
+function Merge-Cutoffs {
+    param([hashtable]$Cache, $Object, [switch]$Frozen)
+
+    foreach ($season in 1..20) {
+        if ($season -eq 2 -and -not $Frozen) { continue }
+        $brackets = Get-ObjectProperty $Object ([string]$season)
+        if ($null -eq $brackets) { continue }
+        foreach ($bracket in @(2, 3, 5)) {
+            $entry = Convert-CutoffEntry (Get-ObjectProperty $brackets ([string]$bracket))
+            if ($null -eq $entry) { continue }
+            $key = [string]$season
+            if (-not $Cache.cutoffs.ContainsKey($key)) { $Cache.cutoffs[$key] = @{} }
+            $old = Get-ObjectProperty $Cache.cutoffs[$key] ([string]$bracket)
+            if ($null -eq $old -or $entry.updated -ge $old.updated) {
+                $Cache.cutoffs[$key][[string]$bracket] = $entry
+            }
+        }
+    }
+}
+
+function Set-CacheSeason {
+    param([hashtable]$Cache, [int]$Season)
+
+    if ($Season -ne $Cache.currentSeason) {
+        foreach ($player in $Cache.players.Values) {
+            $player.current = @{}
+            $player.previous = @{}
+        }
+        $Cache.syncedSeasons = @()
+    }
+    $Cache.currentSeason = $Season
+    $Cache.previousSeason = [Math]::Max(0, $Season - 1)
+}
+
+function Sync-RatingCutoffs {
+    param([hashtable]$Cache)
+
+    foreach ($season in @($Cache.currentSeason, $Cache.previousSeason)) {
+        if ($season -le 0 -or $season -eq 2) { continue }
+        foreach ($bracket in @(2, 3, 5)) {
+            $old = Get-ObjectProperty (Get-ObjectProperty $Cache.cutoffs ([string]$season)) ([string]$bracket)
+            # Fresh shared snapshots supply these. Direct fallback checks daily.
+            if ($null -ne $old -and ((Get-UnixTime) - $old.checked) -lt 86400) { continue }
+            try {
+                $payload = Invoke-IronForgeJson -Path ('anniversary/cutoffs/{0}/{1}/{2}/' -f $season, $Region, $bracket)
+                $rows = @(Get-ObjectProperty $payload 'cutoff')
+                if ($rows.Count -ne 5) { throw 'Expected all five cutoff tiers.' }
+                $thresholds = @()
+                $labels = @('Rank One', 'Gladiator', 'Duelist', 'Rival', 'Challenger')
+                for ($i = 0; $i -lt 5; $i++) {
+                    $row = @($rows[$i])
+                    if ($row.Count -lt 2 -or
+                        ($i -eq 0 -and [string]$row[1] -notmatch '^.+ Gladiator$') -or
+                        ($i -gt 0 -and [string]$row[1] -ne $labels[$i])) {
+                        throw 'Unexpected cutoff tier order.'
+                    }
+                    $thresholds += $row[0]
+                }
+                $stamp = [DateTimeOffset]::Parse([string](Get-ObjectProperty $payload 'updated'), [Globalization.CultureInfo]::InvariantCulture)
+                $entry = Convert-CutoffEntry @{
+                    updated = $stamp.ToUnixTimeSeconds()
+                    checked = Get-UnixTime
+                    thresholds = $thresholds
+                }
+                if ($null -eq $entry) { throw 'Invalid cutoff values or timestamp.' }
+                Merge-Cutoffs -Cache $Cache -Object @{ ([string]$season) = @{ ([string]$bracket) = $entry } }
+            } catch {
+                Write-Log ('US S{0} {1}v{1} cutoffs unavailable; retaining last valid values. {2}' -f $season, $bracket, $_.Exception.Message)
+            }
+        }
     }
 }
 
@@ -195,8 +296,9 @@ function Read-Cache {
         $raw = Get-Content -LiteralPath $CachePath -Raw -Encoding UTF8 | ConvertFrom-Json
         $season = Get-ObjectProperty $raw 'currentSeason'
         if ($null -ne $season) {
-            $cache.currentSeason = [int]$season
+            Set-CacheSeason -Cache $cache -Season ([int]$season)
         }
+        Merge-Cutoffs -Cache $cache -Object (Get-ObjectProperty $raw 'cutoffs')
 
         $lastUpdated = Get-ObjectProperty $raw 'lastLeaderboardUpdated'
         if ($null -ne $lastUpdated) {
@@ -205,7 +307,7 @@ function Read-Cache {
 
         $rawVersion = [int]((Get-ObjectProperty $raw 'version') -as [int])
         $synced = Get-ObjectProperty $raw 'syncedSeasons'
-        if ($rawVersion -ge 3 -and $null -ne $synced) {
+        if ($rawVersion -ge 6 -and $null -ne $synced) {
             $cache.syncedSeasons = @($synced | ForEach-Object { [int]$_ })
         }
 
@@ -233,6 +335,7 @@ function Read-Cache {
 
                 $record = Get-PlayerRecord -Cache $cache -Name $name -Realm $realm
                 $record.current = Convert-RatingMap (Get-ObjectProperty $value 'current')
+                $record.previous = Convert-SharedRatingMap (Get-ObjectProperty $value 'previous')
                 $record.bestSeen = Convert-RatingMap (Get-ObjectProperty $value 'bestSeen')
                 $record.exactBest = Convert-RatingMap (Get-ObjectProperty $value 'exactBest')
                 $record.exactFetchedAt = [int64]((Get-ObjectProperty $value 'exactFetchedAt') -as [int64])
@@ -253,6 +356,7 @@ function Read-Cache {
                     $cache.sharedPlayers[$hash] = @{
                         current = Convert-RatingMap (Get-ObjectProperty $value 'current')
                         bestSeen = Convert-RatingMap (Get-ObjectProperty $value 'bestSeen')
+                        previous = Convert-SharedRatingMap (Get-ObjectProperty $value 'previous')
                     }
                 }
             }
@@ -357,6 +461,7 @@ function Get-PlayerRecord {
             name = $Name
             realm = $canonicalRealm
             current = @{}
+            previous = @{}
             bestSeen = @{}
             exactBest = @{}
             exactFetchedAt = 0
@@ -386,7 +491,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.2.7 (local WoW addon updater; adaptive-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.3.0 (local WoW addon updater; adaptive-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -435,7 +540,7 @@ function Get-SharedSnapshot {
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.2.7 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.3.0 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()
@@ -512,7 +617,9 @@ function Sync-SharedSnapshot {
         return $false
     }
     $playerProperties = @($sharedPlayers.PSObject.Properties)
-    if ($version -lt 4 -or $keyAlgorithm -ne 'nsr-h4-v1' -or $season -le 0 -or
+    $previousSeason = [int]((Get-ObjectProperty $snapshot 'previousSeason') -as [int])
+    if ($version -lt 6 -or $keyAlgorithm -ne 'nsr-h4-v1' -or $season -lt $Cache.currentSeason -or $season -gt 20 -or
+        $previousSeason -ne ($season - 1) -or
         $region -ne $Region -or $playerProperties.Count -le 0 -or
         $playerProperties.Count -gt $SharedSnapshotMaxPlayers) {
         Write-Log 'Shared snapshot failed validation; using direct IronForge fallback.'
@@ -529,10 +636,11 @@ function Sync-SharedSnapshot {
         $value = $property.Value
         $current = Convert-SharedRatingMap (Get-ObjectProperty $value 'current')
         $bestSeen = Convert-SharedRatingMap (Get-ObjectProperty $value 'bestSeen')
-        if ($current.Count -eq 0 -and $bestSeen.Count -eq 0) {
+        $previous = Convert-SharedRatingMap (Get-ObjectProperty $value 'previous')
+        if ($current.Count -eq 0 -and $bestSeen.Count -eq 0 -and $previous.Count -eq 0) {
             continue
         }
-        $newSharedPlayers[$hash] = @{ current = $current; bestSeen = $bestSeen }
+        $newSharedPlayers[$hash] = @{ current = $current; bestSeen = $bestSeen; previous = $previous }
         $merged++
     }
 
@@ -548,13 +656,16 @@ function Sync-SharedSnapshot {
 
     # Preserve private exact highs while refreshing their current values from the
     # newer shared row when that character is present on a leaderboard.
+    Set-CacheSeason -Cache $Cache -Season $season
     foreach ($player in @($Cache.players.Values)) {
         $player.current = @{}
+        $player.previous = @{}
         $hash = Get-LookupHash -Name ([string]$player.name) -Realm ([string]$player.realm)
         if ($null -eq $hash -or -not $newSharedPlayers.ContainsKey($hash)) {
             continue
         }
         $sharedCurrent = $newSharedPlayers[$hash].current
+        $player.previous = Convert-SharedRatingMap $newSharedPlayers[$hash].previous
         foreach ($bracket in @(2, 3, 5)) {
             $key = [string]$bracket
             if ($sharedCurrent.ContainsKey($key)) {
@@ -564,6 +675,7 @@ function Sync-SharedSnapshot {
     }
 
     $Cache.currentSeason = $season
+    Merge-Cutoffs -Cache $Cache -Object (Get-ObjectProperty $snapshot 'cutoffs')
     $Cache.sharedPlayers = $newSharedPlayers
     $Cache.sharedGenerated = [int64]((Get-ObjectProperty $snapshot 'generated') -as [int64])
     $Cache.lastLeaderboardUpdated = [int64]((Get-ObjectProperty $snapshot 'leaderboardUpdated') -as [int64])
@@ -607,10 +719,11 @@ function Sync-LeaderboardSeason {
             continue
         }
 
-        if ($IsCurrent) {
+        if ($IsCurrent -or $Season -eq $Cache.previousSeason) {
             foreach ($cachedPlayer in $Cache.players.Values) {
                 if ($null -ne (Resolve-SupportedRealm ([string]$cachedPlayer.realm))) {
-                    [void]$cachedPlayer.current.Remove([string]$bracket)
+                    $map = $(if ($IsCurrent) { $cachedPlayer.current } else { $cachedPlayer.previous })
+                    [void]$map.Remove([string]$bracket)
                 }
             }
         }
@@ -638,6 +751,8 @@ function Sync-LeaderboardSeason {
             $player.lastSeen = $now
             if ($IsCurrent) {
                 $player.current[[string]$bracket] = $rating
+            } elseif ($Season -eq $Cache.previousSeason) {
+                $player.previous[[string]$bracket] = $rating
             }
 
             $previousBest = 0
@@ -930,7 +1045,7 @@ function Format-LuaSharedPlayer {
     param($Player)
 
     $ratings = @()
-    foreach ($mapName in @('current', 'bestSeen')) {
+    foreach ($mapName in @('current', 'bestSeen', 'previous')) {
         $map = Get-ObjectProperty $Player $mapName
         foreach ($bracket in @(2, 3, 5)) {
             $ratings += Get-CachedRating -Map $map -Bracket $bracket
@@ -954,6 +1069,7 @@ function Write-LuaData {
     [void]$builder.AppendLine('        realms = { "Nightslayer", "Dreamscythe" },')
     [void]$builder.AppendLine(('        region = "{0}",' -f (Escape-LuaString $Region)))
     [void]$builder.AppendLine(('        season = {0},' -f [int]$Cache.currentSeason))
+    [void]$builder.AppendLine(('        previousSeason = {0},' -f [int]$Cache.previousSeason))
     [void]$builder.AppendLine(('        generated = {0},' -f $now))
     [void]$builder.AppendLine(('        leaderboardUpdated = {0},' -f [int64]$Cache.lastLeaderboardUpdated))
     [void]$builder.AppendLine(('        sharedGenerated = {0},' -f [int64]$Cache.sharedGenerated))
@@ -963,6 +1079,18 @@ function Write-LuaData {
     [void]$builder.AppendLine(('            Dreamscythe = {0},' -f [int]$Cache.sharedCounts.Dreamscythe))
     [void]$builder.AppendLine('        },')
     [void]$builder.AppendLine('        source = "ironforge.pro via shared snapshot and local lookups",')
+    [void]$builder.AppendLine('    },')
+    [void]$builder.AppendLine('    cutoffs = {')
+    foreach ($season in @($Cache.cutoffs.Keys | Sort-Object { [int]$_ })) {
+        [void]$builder.AppendLine(('        [{0}] = {{' -f [int]$season))
+        foreach ($bracket in @(2, 3, 5)) {
+            $entry = Get-ObjectProperty $Cache.cutoffs[$season] ([string]$bracket)
+            if ($null -eq $entry) { continue }
+            [void]$builder.AppendLine(('            [{0}] = {{ updated = {1}, thresholds = {{ {2} }} }},' -f
+                $bracket, [int64]$entry.updated, ($entry.thresholds -join ', ')))
+        }
+        [void]$builder.AppendLine('        },')
+    }
     [void]$builder.AppendLine('    },')
     [void]$builder.AppendLine('    sharedPlayers = {')
     foreach ($hash in @($Cache.sharedPlayers.Keys | Sort-Object)) {
@@ -981,6 +1109,7 @@ function Write-LuaData {
         $hasData = $isExact
         foreach ($bracket in @(2, 3, 5)) {
             if ((Get-CachedRating -Map $player.current -Bracket $bracket) -gt 0 -or
+                (Get-CachedRating -Map $player.previous -Bracket $bracket) -gt 0 -or
                 (Get-CachedRating -Map $player.bestSeen -Bracket $bracket) -gt 0 -or
                 (Get-CachedRating -Map $player.exactBest -Bracket $bracket) -gt 0) {
                 $hasData = $true
@@ -1015,6 +1144,7 @@ function Write-LuaData {
         [void]$builder.AppendLine(('            name = "{0}",' -f $escapedName))
         [void]$builder.AppendLine(('            realm = "{0}",' -f $escapedRealm))
         [void]$builder.AppendLine(('            current = {0},' -f (Format-LuaRatingMap $player.current)))
+        [void]$builder.AppendLine(('            previous = {0},' -f (Format-LuaRatingMap $player.previous)))
         [void]$builder.AppendLine(('            best = {0},' -f (Format-LuaRatingMap $best)))
         [void]$builder.AppendLine(('            exact = {0},' -f $(if ($isExact) { 'true' } else { 'false' })))
         [void]$builder.AppendLine('        },')
@@ -1058,11 +1188,12 @@ try {
     $sharedWorked = Sync-SharedSnapshot -Cache $cache
     if (-not $sharedWorked) {
         # Do not let an older shared row mask the fresher direct fallback below.
+        if ($cache.sharedPlayers.Count -gt 0) { $cache.syncedSeasons = @() }
         $cache.sharedPlayers = @{}
         $cache.sharedCounts = @{ Nightslayer = 0; Dreamscythe = 0 }
         $cache.sharedGenerated = 0
         $currentSeason = Find-CurrentSeason -Cache $cache
-        $cache.currentSeason = $currentSeason
+        Set-CacheSeason -Cache $cache -Season $currentSeason
 
         [void](Sync-LeaderboardSeason -Cache $cache -Season $currentSeason -IsCurrent $true)
 
@@ -1078,6 +1209,7 @@ try {
         }
     }
 
+    Sync-RatingCutoffs -Cache $cache
     $profiles = Sync-QueuedProfiles -Cache $cache -GamePath $WowPath
     Save-Cache -Cache $cache
     $playersWritten = Write-LuaData -Cache $cache -AddonDirectory $AddonPath

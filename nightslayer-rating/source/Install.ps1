@@ -150,7 +150,7 @@ $updaterTarget = Join-Path $env:LOCALAPPDATA 'NightslayerRating'
 foreach ($item in @(Get-ChildItem -LiteralPath $addonSource -Force)) {
     Copy-Item -LiteralPath $item.FullName -Destination $addonTarget -Recurse -Force
 }
-foreach ($name in @('NightslayerRatingUpdater.ps1', 'RunUpdater.vbs')) {
+foreach ($name in @('NightslayerRatingUpdater.ps1', 'RunUpdater.vbs', 'Season2Cutoffs.json')) {
     Copy-Item -LiteralPath (Join-Path $updaterSource $name) -Destination (Join-Path $updaterTarget $name) -Force
 }
 

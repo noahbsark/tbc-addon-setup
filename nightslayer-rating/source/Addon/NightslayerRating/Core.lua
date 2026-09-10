@@ -13,18 +13,8 @@ local HASH_MODULI = { 65521, 65519, 65497, 65479 }
 local HASH_BASES = { 131, 137, 139, 149 }
 local SHARED_CURRENT_INDEX = { [2] = 1, [3] = 2, [5] = 3 }
 local SHARED_BEST_INDEX = { [2] = 4, [3] = 5, [5] = 6 }
-
--- These are neutral visual bands, not official arena titles. Official titles
--- depend on ladder rank at the end of a season and cannot be inferred from a
--- historical rating number alone.
-local RATING_BANDS = {
-    { minimum = 2400, label = "Elite", hex = "ff8000" },
-    { minimum = 2100, label = "Excellent", hex = "a335ee" },
-    { minimum = 1800, label = "Strong", hex = "0070dd" },
-    { minimum = 1500, label = "Competitive", hex = "1eff00" },
-    { minimum = 1, label = "Rated", hex = "ffffff" },
-}
-local INACTIVE_BAND = { label = "Inactive", hex = "aaaaaa" }
+local SHARED_PREVIOUS_INDEX = { [2] = 7, [3] = 8, [5] = 9 }
+local Colors = NightslayerRatingColors
 
 local data = NightslayerRatingData or {
     meta = { realm = DEFAULT_REALM, region = "US", season = 0, generated = 0 },
@@ -376,6 +366,23 @@ local function ExactRating(record)
     return type(record) == "table" and record.exact == true
 end
 
+local function PreviousRating(record, bracket)
+    if type(record) ~= "table" then return nil end
+    if type(record.previous) == "table" then
+        return record.previous[bracket] or record.previous[tostring(bracket)]
+    end
+    local index = SHARED_PREVIOUS_INDEX[bracket]
+    return index and record[index] or nil
+end
+
+local function CurrentSeason()
+    return tonumber(data.meta and data.meta.season) or 0
+end
+
+local function PreviousSeason()
+    return tonumber(data.meta and data.meta.previousSeason) or 0
+end
+
 local function AutomaticExactLookupAvailable()
     return data.meta and data.meta.profileLookup == true
 end
@@ -388,32 +395,33 @@ local function RatingText(value)
     return tostring(math.floor(value + 0.5))
 end
 
-local function GetRatingBand(value)
-    local rating = tonumber(value) or 0
-    if rating <= 0 then
-        return INACTIVE_BAND
+local function ColoredRating(value, bracket, season)
+    return Colors.Text(Colors.Band(data, value, bracket, season), RatingText(value))
+end
+
+local function RatingBandLabel(current, bracket)
+    local band = Colors.Band(data, current, bracket, CurrentSeason())
+    return Colors.Text(band, band.label)
+end
+
+local function HasBracketRating(record, bracket)
+    return (tonumber(CurrentRating(record, bracket)) or 0) > 0 or
+        (tonumber(PreviousRating(record, bracket)) or 0) > 0 or
+        (tonumber(BestRating(record, bracket)) or 0) > 0
+end
+
+local function BracketSummary(record, bracket)
+    local parts = {
+        "Current S" .. CurrentSeason() .. " " ..
+            ColoredRating(CurrentRating(record, bracket), bracket, CurrentSeason()),
+    }
+    if PreviousSeason() > 0 then
+        parts[#parts + 1] = "S" .. PreviousSeason() .. " " ..
+            ColoredRating(PreviousRating(record, bracket), bracket, PreviousSeason())
     end
-
-    for _, band in ipairs(RATING_BANDS) do
-        if rating >= band.minimum then
-            return band
-        end
-    end
-
-    return INACTIVE_BAND
-end
-
-local function ColorText(band, text)
-    return "|cff" .. band.hex .. tostring(text) .. "|r"
-end
-
-local function ColoredRating(value)
-    return ColorText(GetRatingBand(value), RatingText(value))
-end
-
-local function RatingBandLabel(current)
-    local band = GetRatingBand(current)
-    return ColorText(band, band.label)
+    parts[#parts + 1] = (ExactRating(record) and "Record " or "Observed ") ..
+        ColoredRating(BestRating(record, bracket)) .. (ExactRating(record) and "" or "*")
+    return table.concat(parts, "   ")
 end
 
 local function ShowWhisperRating(fullName)
@@ -455,17 +463,13 @@ local function ShowWhisperRating(fullName)
     local exact = ExactRating(record)
     for _, bracket in ipairs(BRACKETS) do
         local current = CurrentRating(record, bracket)
-        local best = BestRating(record, bracket)
-        if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
+        if HasBracketRating(record, bracket) then
             parts[#parts + 1] = string.format(
-                "%dv%d %s: %s current / %s %s%s",
+                "%dv%d %s: %s",
                 bracket,
                 bracket,
-                RatingBandLabel(current),
-                ColoredRating(current),
-                ColoredRating(best),
-                exact and "record high" or "observed",
-                exact and "" or "*"
+                RatingBandLabel(current, bracket),
+                BracketSummary(record, bracket)
             )
         end
     end
@@ -516,25 +520,15 @@ local function AddRatingLines(tooltip, fullName, resultID)
 
     for _, bracket in ipairs(BRACKETS) do
         local current = CurrentRating(record, bracket)
-        local best = BestRating(record, bracket)
-
-        if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
+        if HasBracketRating(record, bracket) then
             foundRating = true
-            local bestLabel = exact and "Record " or "Observed "
-            local suffix = exact and "" or "*"
             local left = string.format(
                 "%dv%d  %s",
                 bracket,
                 bracket,
-                RatingBandLabel(current)
+                RatingBandLabel(current, bracket)
             )
-            local right = string.format(
-                "Current %s   %s%s%s",
-                ColoredRating(current),
-                bestLabel,
-                ColoredRating(best),
-                suffix
-            )
+            local right = BracketSummary(record, bracket)
             tooltip:AddDoubleLine(left, right, 0.35, 0.75, 1.00, 0.80, 0.80, 0.80)
         end
     end
@@ -549,6 +543,7 @@ local function AddRatingLines(tooltip, fullName, resultID)
         end
     end
 
+    tooltip:AddLine(Colors.Status(data), 0.55, 0.55, 0.55)
     local generated = data.meta and tonumber(data.meta.generated)
     if generated and generated > 0 then
         tooltip:AddLine("Synced " .. date("%Y-%m-%d %H:%M", generated), 0.45, 0.45, 0.45)
@@ -640,22 +635,15 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
 
         for _, bracket in ipairs(BRACKETS) do
             local current = CurrentRating(record, bracket)
-            local best = BestRating(record, bracket)
-
-            if (tonumber(current) or 0) > 0 or (tonumber(best) or 0) > 0 then
+            if HasBracketRating(record, bracket) then
                 foundRating = true
-                local bestLabel = exact and "Record" or "Observed"
-                local suffix = exact and "" or "*"
                 displayLines[#displayLines + 1] = {
                     string.format(
-                        "|cff59bfff%dv%d|r  %s   Current %s   %s %s%s",
+                        "|cff59bfff%dv%d|r  %s   %s",
                         bracket,
                         bracket,
-                        RatingBandLabel(current),
-                        ColoredRating(current),
-                        bestLabel,
-                        ColoredRating(best),
-                        suffix
+                        RatingBandLabel(current, bracket),
+                        BracketSummary(record, bracket)
                     ),
                     1.00,
                     1.00,
@@ -678,6 +666,7 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
         end
     end
 
+    displayLines[#displayLines + 1] = { Colors.Status(data), 0.55, 0.55, 0.55 }
     local baseHeight = tooltip:GetHeight()
     local baseWidth = tooltip:GetWidth()
     local lineHeight = 14
@@ -842,6 +831,16 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
     elseif command == "off" then
         NightslayerRatingSettings.enabled = false
         print("|cffffd200Nightslayer Rating:|r disabled")
+    elseif command == "cutoffs" then
+        print(Colors.Status(data))
+        for _, season in ipairs({ CurrentSeason(), PreviousSeason() }) do
+            if season > 0 then
+                for _, bracket in ipairs(BRACKETS) do
+                    print(Colors.Details(data, season, bracket))
+                end
+            end
+        end
+        print("IronForge cutoff estimates describe rating ranges, not earned titles. S2 is frozen; Record/Observed is all-time and unclassified.")
     elseif command == "lookup" and rest ~= "" then
         if QueuePlayer(rest, true) then
             if AutomaticExactLookupAvailable() then
@@ -884,6 +883,7 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
             tostring((data.meta and data.meta.season) or "?"),
             AutomaticExactLookupAvailable() and "automatic" or "requires Windows companion"
         ))
-        print("Commands: /nsr on, /nsr off, /nsr lookup NAME[-REALM]")
+        print(Colors.Status(data))
+        print("Commands: /nsr on, /nsr off, /nsr cutoffs, /nsr lookup NAME[-REALM]")
     end
 end
