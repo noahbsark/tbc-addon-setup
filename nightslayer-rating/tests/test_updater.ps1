@@ -16,10 +16,13 @@ $DefaultRealm = 'Nightslayer'
 $SupportedRealms = @{ nightslayer = 'Nightslayer'; dreamscythe = 'Dreamscythe' }
 $Region = 'US'
 $SharedSnapshotMaxPlayers = 100000
+$SharedSnapshotMaxCompressedBytes = 10485760
+$SharedSnapshotMaxJsonChars = 52428800
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('nsr-test-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($directory)
 $CachePath = Join-Path $directory 'cache.json'
+$BundledSnapshotPath = Join-Path $directory 'BundledSnapshot.json.gz'
 $script:logs = @()
 function Write-Log { param([string]$Message) $script:logs += $Message }
 function Start-Sleep { param($Milliseconds, $Seconds) }
@@ -119,6 +122,102 @@ try {
     Assert (Sync-LeaderboardSeason $cache 2 $false) 'Archive fallback failed'
     Assert ($player.previous['3'] -eq 2403) 'Archive fallback did not populate previous rating'
     Assert ($player.current.Count -eq 0) 'Archive fallback overwrote current season'
+
+    # A missing future season returns an HTTP 500 marker in production. It
+    # must not be mistaken for a one-row leaderboard and promote S3 to S20.
+    $script:probes = 0
+    function Get-Leaderboard {
+        param($Season, $Bracket, [switch]$Probe)
+        $script:probes++
+        return [pscustomobject]@{ __nsrTransientError = $true; statusCode = 500 }
+    }
+    Assert ((Find-CurrentSeason $cache) -eq 3) 'HTTP 500 invented a future season'
+    Assert ($script:probes -eq 1) 'Missing future season was probed repeatedly'
+    Assert (-not (Test-LeaderboardPayload $null)) 'Null payload accepted'
+    Assert (-not (Test-LeaderboardPayload @{ data = @($null) })) 'Null row accepted'
+    Assert (-not (Test-LeaderboardPayload @{ data = @(@{ error = 'offline' }) })) 'Error row accepted'
+    Assert (Test-LeaderboardPayload @{ data = @(@{ name = 'Twinname'; server = 'Nightslayer'; rating = 2000 }) }) 'A single valid row was rejected'
+
+    # Seed the same compressed snapshot shipped in the Windows installer.
+    $seed = @{
+        version = 6; season = 3; previousSeason = 2; region = 'US'; keyAlgorithm = 'nsr-h4-v1'
+        generated = ((Get-UnixTime) - 20); leaderboardUpdated = ((Get-UnixTime) - 20)
+        counts = @{ Nightslayer = 1; Dreamscythe = 0 }; cutoffs = $cache.cutoffs
+        players = @{ $hash = @{ current = @{ '2' = 2058; '3' = 2006; '5' = 2078 }
+            bestSeen = @{ '2' = 2900 }; previous = @{ '2' = 2481 } } }
+    }
+    foreach ($entry in $seed.cutoffs['3'].Values) { $entry.checked = Get-UnixTime }
+    $bytes = $Utf8NoBom.GetBytes(($seed | ConvertTo-Json -Depth 12))
+    $stream = [IO.File]::Create($BundledSnapshotPath)
+    $zip = New-Object IO.Compression.GZipStream($stream, [IO.Compression.CompressionMode]::Compress)
+    $zip.Write($bytes, 0, $bytes.Length)
+    $zip.Dispose()
+    $stream.Dispose()
+    Assert ((Read-CompressedSnapshot ([IO.File]::ReadAllBytes($BundledSnapshotPath))).version -eq 6) 'Bundled gzip did not decode'
+
+    $legacy = @{
+        version = 5; season = 3; region = 'US'; keyAlgorithm = 'nsr-h4-v1'
+        generated = Get-UnixTime; leaderboardUpdated = Get-UnixTime
+        counts = @{ Nightslayer = 1; Dreamscythe = 0 }
+        players = @{ $hash = @{ current = @{ '2' = 2100 }; bestSeen = @{ '2' = 2900 } } }
+    }
+    $script:snapshot = $legacy
+    $script:probes = 0
+    $script:profilePasses = 0
+    function Sync-QueuedProfiles { param($Cache, $GamePath) $script:profilePasses++; return 0 }
+    $fresh = New-Cache
+    Update-RatingData $fresh $directory $directory
+    Assert ($script:probes -eq 0) 'Valid v5 snapshot triggered bulk fallback'
+    Assert ($fresh.sharedPlayers[$hash].current['2'] -eq 2100) 'Legacy current ratings did not load'
+    Assert ($fresh.sharedPlayers[$hash].previous['2'] -eq 2481) 'Legacy import erased bundled history'
+    Assert ($fresh.cutoffs['3']['2'].thresholds[0] -eq 2199) 'Legacy import erased bundled cutoffs'
+    $written = Get-Content (Join-Path $directory 'Data.lua') -Raw
+    Assert ($written.Contains('2100, 0, 0, 2900, 0, 0')) 'Legacy ratings were not written to Lua'
+    Assert ($script:profilePasses -eq 1) 'Legacy import skipped exact profile lookups'
+
+    $legacy.version = 4
+    Assert (Import-SharedSnapshot $fresh ($legacy | ConvertTo-Json -Depth 12 | ConvertFrom-Json)) 'v4 compatibility failed'
+    $legacy.players[$hash].current['2'] = 1900
+    $legacy.leaderboardUpdated = 1
+    Assert (Import-SharedSnapshot $fresh ($legacy | ConvertTo-Json -Depth 12 | ConvertFrom-Json)) 'Older snapshot was treated as an outage'
+    Assert ($fresh.sharedPlayers[$hash].current['2'] -eq 2100) 'Older snapshot rolled back cached ratings'
+    $legacy.leaderboardUpdated = Get-UnixTime
+    $legacy.players = @{ 'bad-hash' = @{ current = @{ '2' = 2100 } } }
+    Assert (-not (Import-SharedSnapshot $fresh ($legacy | ConvertTo-Json -Depth 12 | ConvertFrom-Json))) 'Zero valid rows were accepted'
+    Assert ($fresh.sharedPlayers[$hash].current['2'] -eq 2100) 'Invalid shared data erased good rows'
+
+    # First installation with both sources unavailable keeps the bundle usable.
+    function Get-SharedSnapshot { return $null }
+    function Get-Leaderboard { param($Season, $Bracket, [switch]$Probe) throw 'HTTP 500' }
+    $offline = New-Cache
+    Update-RatingData $offline $directory $directory
+    Assert ($offline.currentSeason -eq 3) 'Offline run changed season'
+    Assert ($offline.sharedPlayers[$hash].current['2'] -eq 2058) 'Offline run lost bundled data'
+    $written = Get-Content (Join-Path $directory 'Data.lua') -Raw
+    Assert ($written.Contains('2058, 2006, 2078, 2900, 0, 0')) 'Offline install overwrote bundled ratings'
+    Assert ($script:profilePasses -eq 2) 'Bulk failure aborted later update stages'
+
+    # One successful bracket must not erase the two failed brackets, and must
+    # refresh the shared row that the addon actually prefers for non-exact data.
+    function Get-Leaderboard {
+        param($Season, $Bracket, [switch]$Probe)
+        if ($Bracket -eq 2) { throw 'HTTP 500' }
+        if ($Bracket -eq 5) { return @{ data = @() } }
+        return @{ updated = ((Get-UnixTime) * 1000); data = @(@{ server = 'Nightslayer'; name = 'Twinname'; rating = 2200 }) }
+    }
+    Assert (-not (Sync-LeaderboardSeason $offline 3 $true)) 'Partial failure reported as complete'
+    Assert ($offline.sharedPlayers[$hash].current['2'] -eq 2058) 'Failed 2v2 refresh erased its cache'
+    Assert ($offline.sharedPlayers[$hash].current['3'] -eq 2200) 'Fresh fallback was masked by old shared 3v3'
+    Assert ($offline.sharedPlayers[$hash].current['5'] -eq 2078) 'Empty 5v5 response erased its cache'
+
+    # An install without any bootstrap cache must not replace existing Data.lua
+    # with an empty player table when every network request fails.
+    $BundledSnapshotPath = Join-Path $directory 'missing.gz'
+    function Get-Leaderboard { param($Season, $Bracket, [switch]$Probe) throw 'HTTP 500' }
+    $empty = New-Cache
+    $before = Get-Content (Join-Path $directory 'Data.lua') -Raw
+    Update-RatingData $empty $directory $directory
+    Assert ((Get-Content (Join-Path $directory 'Data.lua') -Raw) -eq $before) 'Empty offline update replaced existing addon data'
     Write-Output 'Updater cutoff refresh, failure retention, cache migration, rendering and rollover tests passed'
 } finally {
     Remove-Item -LiteralPath $directory -Recurse -Force

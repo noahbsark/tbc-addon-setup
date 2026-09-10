@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Build both installable addon ZIPs from source and a generated Lua snapshot."""
+"""Build both ZIPs and an offline companion cache from the same JSON snapshot."""
 import argparse
 import gzip
 import hashlib
+import importlib.util
+import json
 from pathlib import Path
 import re
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
@@ -12,12 +14,18 @@ SOURCE = ROOT / "nightslayer-rating/source"
 ADDON = SOURCE / "Addon/NightslayerRating"
 
 
-def build(data_path: Path) -> list[Path]:
-    data = data_path.read_bytes()
-    if data_path.suffix == ".gz":
-        data = gzip.decompress(data)
-    if b"NightslayerRatingData = {" not in data or b"previousSeason = " not in data:
-        raise ValueError("Expected a generated season-aware Lua snapshot")
+def build(snapshot_path: Path) -> list[Path]:
+    encoded = snapshot_path.read_bytes()
+    if snapshot_path.suffix == ".gz":
+        encoded = gzip.decompress(encoded)
+    snapshot = json.loads(encoded)
+    if snapshot.get("version") != 6 or snapshot.get("region") != "US" or not snapshot.get("players"):
+        raise ValueError("Expected a complete v6 US JSON snapshot")
+    spec = importlib.util.spec_from_file_location("build_shared_cache", ROOT / "central-rating-data/build_shared_cache.py")
+    publisher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(publisher)
+    data = publisher.render_lua(snapshot).encode("utf-8")
+    bundled_snapshot = gzip.compress(encoded, compresslevel=9, mtime=0)
     toc = (ADDON / "NightslayerRating.toc").read_text()
     version = re.search(r"^## Version: (.+)$", toc, re.MULTILINE).group(1)
     output = ROOT / "nightslayer-rating/downloads"
@@ -33,6 +41,7 @@ def build(data_path: Path) -> list[Path]:
         files[data_name] = data
         if flavor == "Windows":
             files[f"{prefix}/LICENSE.txt"] = (ADDON / "LICENSE.txt").read_bytes()
+            files[f"{prefix}/Updater/BundledSnapshot.json.gz"] = bundled_snapshot
         with ZipFile(artifact, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
             for name, payload in sorted(files.items()):
                 info = ZipInfo(name, date_time=(2026, 9, 10, 0, 0, 0))
@@ -47,7 +56,7 @@ def build(data_path: Path) -> list[Path]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=Path, required=True)
+    parser.add_argument("--snapshot", type=Path, required=True)
     args = parser.parse_args()
-    for artifact in build(args.data):
+    for artifact in build(args.snapshot):
         print(f"{artifact.name}: {artifact.stat().st_size:,} bytes")

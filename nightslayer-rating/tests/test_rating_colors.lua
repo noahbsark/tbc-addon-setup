@@ -85,13 +85,13 @@ assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(#messages == 1)
 assert(messages[1]:find("Current S3 |cffa335ee2058|r", 1, true))
-assert(messages[1]:find("S2 |cffa335ee2481|r", 1, true))
-assert(messages[1]:find("Record |cffffffff2900|r", 1, true))
+assert(not messages[1]:find("S2 ", 1, true))
+assert(messages[1]:find("Peak |cffff80002900|r", 1, true))
 hooks.OnTooltipSetUnit(GameTooltip)
 local tooltip = table.concat(lines, "\n")
 assert(tooltip:find("Current S3 |cffa335ee2058|r", 1, true))
-assert(tooltip:find("S2 |cffa335ee2481|r", 1, true))
-assert(tooltip:find("Record |cffffffff2900|r", 1, true))
+assert(not tooltip:find("S2 ", 1, true))
+assert(tooltip:find("Peak |cffff80002900|r", 1, true))
 
 -- A legacy six-number row has no previous-season rating; do not relabel its best.
 data.players = { ["Nightslayer|Twinname"] = { 0, 0, 0, 2900, 0, 0,
@@ -99,12 +99,31 @@ data.players = { ["Nightslayer|Twinname"] = { 0, 0, 0, 2900, 0, 0,
 data.sharedPlayers = {}
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
-assert(messages[2]:find("S2 |cffaaaaaa--|r", 1, true))
-assert(messages[2]:find("Observed |cffffffff2900|r*", 1, true))
+assert(not messages[2]:find("S2 ", 1, true))
+assert(messages[2]:find("Observed |cffff80002900|r*", 1, true))
 
 data.players["Nightslayer|Twinname"][7] = 2481
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
-assert(messages[3]:find("S2 |cffa335ee2481|r", 1, true))
+assert(not messages[3]:find("S2 ", 1, true))
 assert(messages[3]:find("Inactive", 1, true))
+
+-- An identical lifetime peak gets a different S2 color in each bracket;
+-- S3 color changes must never recolor that fixed historical comparison.
+data.players = { ["Nightslayer|Twinname"] = {
+    name = "Twinname", realm = "Nightslayer", exact = true,
+    current = { [2] = 2400, [3] = 2400, [5] = 2400 },
+    best = { [2] = 2400, [3] = 2400, [5] = 2400 },
+} }
+assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
+events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
+assert(messages[4]:find("Current S3 |cffff80002400|r", 1, true))
+assert(messages[4]:find("Peak |cff0070dd2400|r", 1, true))
+assert(messages[4]:find("Peak |cffa335ee2400|r", 1, true))
+assert(messages[4]:find("Peak |cffff80002400|r", 1, true))
+data.cutoffs[3][2].thresholds[1] = 2500
+assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
+events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
+assert(messages[5]:find("Current S3 |cffa335ee2400|r", 1, true))
+assert(messages[5]:find("Peak |cff0070dd2400|r", 1, true))
 print("Rating color boundaries, season isolation, tooltip and whisper tests passed")

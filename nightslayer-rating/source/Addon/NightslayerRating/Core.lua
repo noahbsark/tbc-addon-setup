@@ -13,7 +13,7 @@ local HASH_MODULI = { 65521, 65519, 65497, 65479 }
 local HASH_BASES = { 131, 137, 139, 149 }
 local SHARED_CURRENT_INDEX = { [2] = 1, [3] = 2, [5] = 3 }
 local SHARED_BEST_INDEX = { [2] = 4, [3] = 5, [5] = 6 }
-local SHARED_PREVIOUS_INDEX = { [2] = 7, [3] = 8, [5] = 9 }
+local PEAK_COMPARISON_SEASON = 2
 local Colors = NightslayerRatingColors
 
 local data = NightslayerRatingData or {
@@ -366,21 +366,8 @@ local function ExactRating(record)
     return type(record) == "table" and record.exact == true
 end
 
-local function PreviousRating(record, bracket)
-    if type(record) ~= "table" then return nil end
-    if type(record.previous) == "table" then
-        return record.previous[bracket] or record.previous[tostring(bracket)]
-    end
-    local index = SHARED_PREVIOUS_INDEX[bracket]
-    return index and record[index] or nil
-end
-
 local function CurrentSeason()
     return tonumber(data.meta and data.meta.season) or 0
-end
-
-local function PreviousSeason()
-    return tonumber(data.meta and data.meta.previousSeason) or 0
 end
 
 local function AutomaticExactLookupAvailable()
@@ -406,7 +393,6 @@ end
 
 local function HasBracketRating(record, bracket)
     return (tonumber(CurrentRating(record, bracket)) or 0) > 0 or
-        (tonumber(PreviousRating(record, bracket)) or 0) > 0 or
         (tonumber(BestRating(record, bracket)) or 0) > 0
 end
 
@@ -415,12 +401,9 @@ local function BracketSummary(record, bracket)
         "Current S" .. CurrentSeason() .. " " ..
             ColoredRating(CurrentRating(record, bracket), bracket, CurrentSeason()),
     }
-    if PreviousSeason() > 0 then
-        parts[#parts + 1] = "S" .. PreviousSeason() .. " " ..
-            ColoredRating(PreviousRating(record, bracket), bracket, PreviousSeason())
-    end
-    parts[#parts + 1] = (ExactRating(record) and "Record " or "Observed ") ..
-        ColoredRating(BestRating(record, bracket)) .. (ExactRating(record) and "" or "*")
+    parts[#parts + 1] = (ExactRating(record) and "Peak " or "Observed ") ..
+        ColoredRating(BestRating(record, bracket), bracket, PEAK_COMPARISON_SEASON) ..
+        (ExactRating(record) and "" or "*")
     return table.concat(parts, "   ")
 end
 
@@ -833,14 +816,14 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         print("|cffffd200Nightslayer Rating:|r disabled")
     elseif command == "cutoffs" then
         print(Colors.Status(data))
-        for _, season in ipairs({ CurrentSeason(), PreviousSeason() }) do
+        for _, season in ipairs({ CurrentSeason(), PEAK_COMPARISON_SEASON }) do
             if season > 0 then
                 for _, bracket in ipairs(BRACKETS) do
                     print(Colors.Details(data, season, bracket))
                 end
             end
         end
-        print("IronForge cutoff estimates describe rating ranges, not earned titles. S2 is frozen; Record/Observed is all-time and unclassified.")
+        print("Current uses current-season cutoffs. Lifetime Peak/Observed uses frozen S2 cutoffs as a color guide, not an earned-title claim.")
     elseif command == "lookup" and rest ~= "" then
         if QueuePlayer(rest, true) then
             if AutomaticExactLookupAvailable() then

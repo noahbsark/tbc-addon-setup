@@ -153,6 +153,10 @@ foreach ($item in @(Get-ChildItem -LiteralPath $addonSource -Force)) {
 foreach ($name in @('NightslayerRatingUpdater.ps1', 'RunUpdater.vbs', 'Season2Cutoffs.json')) {
     Copy-Item -LiteralPath (Join-Path $updaterSource $name) -Destination (Join-Path $updaterTarget $name) -Force
 }
+$bundledSnapshot = Join-Path $updaterSource 'BundledSnapshot.json.gz'
+if (Test-Path -LiteralPath $bundledSnapshot) {
+    Copy-Item -LiteralPath $bundledSnapshot -Destination (Join-Path $updaterTarget 'BundledSnapshot.json.gz') -Force
+}
 
 $config = @{
     WowPath = $resolvedWowPath

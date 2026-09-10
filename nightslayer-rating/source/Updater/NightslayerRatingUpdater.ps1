@@ -28,6 +28,7 @@ $PriorityOffset = 2000000000
 $UpdaterDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigPath = Join-Path $UpdaterDirectory 'config.json'
 $CachePath = Join-Path $UpdaterDirectory 'cache.json'
+$BundledSnapshotPath = Join-Path $UpdaterDirectory 'BundledSnapshot.json.gz'
 $LogPath = Join-Path $UpdaterDirectory 'updater.log'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -237,7 +238,7 @@ function Set-CacheSeason {
     param([hashtable]$Cache, [int]$Season)
 
     if ($Season -ne $Cache.currentSeason) {
-        foreach ($player in $Cache.players.Values) {
+        foreach ($player in @($Cache.players.Values) + @($Cache.sharedPlayers.Values)) {
             $player.current = @{}
             $player.previous = @{}
         }
@@ -491,7 +492,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.3.0 (local WoW addon updater; adaptive-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.3.1 (local WoW addon updater; adaptive-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -524,6 +525,50 @@ function Invoke-IronForgeJson {
     return $null
 }
 
+function Read-CompressedSnapshot {
+    param([byte[]]$Bytes)
+
+    if ($Bytes.Length -le 0 -or $Bytes.Length -gt $SharedSnapshotMaxCompressedBytes) {
+        throw 'Snapshot exceeded the compressed-size limit.'
+    }
+    $memory = $null
+    $gzip = $null
+    $reader = $null
+    try {
+        $memory = New-Object IO.MemoryStream(,$Bytes)
+        $gzip = New-Object IO.Compression.GZipStream($memory, [IO.Compression.CompressionMode]::Decompress)
+        $reader = New-Object IO.StreamReader($gzip, $Utf8NoBom)
+        $jsonBuilder = New-Object Text.StringBuilder
+        [char[]]$buffer = New-Object char[] 8192
+        while (($read = $reader.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            if (($jsonBuilder.Length + $read) -gt $SharedSnapshotMaxJsonChars) {
+                throw 'Snapshot exceeded the decompressed-size limit.'
+            }
+            [void]$jsonBuilder.Append($buffer, 0, $read)
+        }
+        return $jsonBuilder.ToString() | ConvertFrom-Json -ErrorAction Stop
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        if ($null -ne $gzip) { $gzip.Dispose() }
+        if ($null -ne $memory) { $memory.Dispose() }
+    }
+}
+
+function Initialize-BundledSnapshot {
+    param([hashtable]$Cache)
+
+    if ($Cache.sharedPlayers.Count -gt 0 -or -not (Test-Path -LiteralPath $BundledSnapshotPath)) { return }
+    try {
+        if ((Get-Item -LiteralPath $BundledSnapshotPath).Length -gt $SharedSnapshotMaxCompressedBytes) {
+            throw 'Bundled snapshot exceeded the size limit.'
+        }
+        $snapshot = Read-CompressedSnapshot ([IO.File]::ReadAllBytes($BundledSnapshotPath))
+        [void](Import-SharedSnapshot -Cache $Cache -Snapshot $snapshot -SourceLabel 'Bundled snapshot')
+    } catch {
+        Write-Log ('Bundled snapshot unavailable; preserving existing data. ' + $_.Exception.Message)
+    }
+}
+
 function Get-SharedSnapshot {
     $delays = @(1, 3, 8)
 
@@ -532,15 +577,12 @@ function Get-SharedSnapshot {
         $response = $null
         $responseStream = $null
         $download = $null
-        $memory = $null
-        $gzip = $null
-        $reader = $null
         try {
             $uri = $SharedSnapshotUrl + '?t=' + (Get-UnixTime)
             $request = [Net.HttpWebRequest]::Create($uri)
             $request.Method = 'GET'
             $request.Accept = 'application/gzip, application/octet-stream'
-            $request.UserAgent = 'NightslayerRating/1.3.0 (shared snapshot client)'
+            $request.UserAgent = 'NightslayerRating/1.3.1 (shared snapshot client)'
             $request.Timeout = 45000
             $request.ReadWriteTimeout = 45000
             $response = $request.GetResponse()
@@ -562,23 +604,7 @@ function Get-SharedSnapshot {
                 throw ('Shared snapshot had an invalid compressed size: ' + $bytes.Length)
             }
 
-            $memory = New-Object IO.MemoryStream(,$bytes)
-            $gzip = New-Object IO.Compression.GZipStream($memory, [IO.Compression.CompressionMode]::Decompress)
-            $reader = New-Object IO.StreamReader($gzip, $Utf8NoBom)
-            $jsonBuilder = New-Object Text.StringBuilder
-            [char[]]$jsonBuffer = New-Object char[] 8192
-            while (($charsRead = $reader.Read($jsonBuffer, 0, $jsonBuffer.Length)) -gt 0) {
-                if (($jsonBuilder.Length + $charsRead) -gt $SharedSnapshotMaxJsonChars) {
-                    throw 'Shared snapshot exceeded the decompressed-size limit.'
-                }
-                [void]$jsonBuilder.Append($jsonBuffer, 0, $charsRead)
-            }
-            $json = $jsonBuilder.ToString()
-            if ([string]::IsNullOrWhiteSpace($json)) {
-                throw ('Shared snapshot had an invalid JSON size: ' + $json.Length)
-            }
-
-            return $json | ConvertFrom-Json -ErrorAction Stop
+            return Read-CompressedSnapshot $bytes
         } catch {
             if ($attempt -eq ($delays.Count - 1)) {
                 Write-Log ('Shared snapshot unavailable; using direct IronForge fallback. ' + $_.Exception.Message)
@@ -586,9 +612,6 @@ function Get-SharedSnapshot {
             }
             Start-Sleep -Seconds $delays[$attempt]
         } finally {
-            if ($null -ne $reader) { $reader.Dispose() }
-            if ($null -ne $gzip) { $gzip.Dispose() }
-            if ($null -ne $memory) { $memory.Dispose() }
             if ($null -ne $download) { $download.Dispose() }
             if ($null -ne $responseStream) { $responseStream.Dispose() }
             if ($null -ne $response) { $response.Dispose() }
@@ -603,6 +626,12 @@ function Sync-SharedSnapshot {
     param([hashtable]$Cache)
 
     $snapshot = Get-SharedSnapshot
+    return Import-SharedSnapshot -Cache $Cache -Snapshot $snapshot
+}
+
+function Import-SharedSnapshot {
+    param([hashtable]$Cache, $Snapshot, [string]$SourceLabel = 'Shared snapshot')
+
     if ($null -eq $snapshot) {
         return $false
     }
@@ -613,17 +642,29 @@ function Sync-SharedSnapshot {
     $keyAlgorithm = [string](Get-ObjectProperty $snapshot 'keyAlgorithm')
     $sharedPlayers = Get-ObjectProperty $snapshot 'players'
     if ($null -eq $sharedPlayers) {
-        Write-Log 'Shared snapshot has no player table; using direct IronForge fallback.'
+        Write-Log ($SourceLabel + ' has no player table; retaining cached data.')
         return $false
     }
     $playerProperties = @($sharedPlayers.PSObject.Properties)
     $previousSeason = [int]((Get-ObjectProperty $snapshot 'previousSeason') -as [int])
-    if ($version -lt 6 -or $keyAlgorithm -ne 'nsr-h4-v1' -or $season -lt $Cache.currentSeason -or $season -gt 20 -or
-        $previousSeason -ne ($season - 1) -or
+    $legacy = $version -eq 4 -or $version -eq 5
+    $generated = [int64]((Get-ObjectProperty $snapshot 'generated') -as [int64])
+    $updated = [int64]((Get-ObjectProperty $snapshot 'leaderboardUpdated') -as [int64])
+    $now = Get-UnixTime
+    if (($version -ne 6 -and -not $legacy) -or $keyAlgorithm -ne 'nsr-h4-v1' -or
+        $season -lt $Cache.currentSeason -or $season -gt 20 -or
+        (-not $legacy -and $previousSeason -ne ($season - 1)) -or
+        $generated -le 0 -or $generated -gt ($now + 3600) -or
+        $updated -le 0 -or $updated -gt ($now + 3600) -or
         $region -ne $Region -or $playerProperties.Count -le 0 -or
         $playerProperties.Count -gt $SharedSnapshotMaxPlayers) {
-        Write-Log 'Shared snapshot failed validation; using direct IronForge fallback.'
+        Write-Log ($SourceLabel + ' failed validation; retaining cached data and trying the fallback.')
         return $false
+    }
+
+    if ($season -eq $Cache.currentSeason -and $updated -lt $Cache.lastLeaderboardUpdated) {
+        Write-Log ($SourceLabel + ' is older than the cached ratings; keeping the newer cache.')
+        return $true
     }
 
     $newSharedPlayers = @{}
@@ -636,7 +677,15 @@ function Sync-SharedSnapshot {
         $value = $property.Value
         $current = Convert-SharedRatingMap (Get-ObjectProperty $value 'current')
         $bestSeen = Convert-SharedRatingMap (Get-ObjectProperty $value 'bestSeen')
-        $previous = Convert-SharedRatingMap (Get-ObjectProperty $value 'previous')
+        $previous = @{}
+        if (-not $legacy) {
+            $previous = Convert-SharedRatingMap (Get-ObjectProperty $value 'previous')
+        } elseif ($Cache.currentSeason -eq $season) {
+            # v4/v5 has no previous-season field. Preserve the archive imported
+            # from the bundle or a prior v6 snapshot instead of erasing it.
+            $old = Get-ObjectProperty $Cache.sharedPlayers $hash
+            $previous = Convert-SharedRatingMap (Get-ObjectProperty $old 'previous')
+        }
         if ($current.Count -eq 0 -and $bestSeen.Count -eq 0 -and $previous.Count -eq 0) {
             continue
         }
@@ -644,9 +693,26 @@ function Sync-SharedSnapshot {
         $merged++
     }
 
+    if ($merged -le 0) {
+        Write-Log ($SourceLabel + ' contained no valid rating rows; keeping the existing cache.')
+        return $false
+    }
+    if ($legacy -and $Cache.currentSeason -eq $season) {
+        foreach ($hash in $Cache.sharedPlayers.Keys) {
+            if ($newSharedPlayers.ContainsKey($hash)) { continue }
+            $old = $Cache.sharedPlayers[$hash]
+            # A player missing from an older format may still have an S2 row.
+            # Only retain historical values; never imply a current rating.
+            $previous = Convert-SharedRatingMap (Get-ObjectProperty $old 'previous')
+            if ($previous.Count -gt 0) {
+                $newSharedPlayers[$hash] = @{ current = @{}; previous = $previous
+                    bestSeen = Convert-SharedRatingMap (Get-ObjectProperty $old 'bestSeen') }
+            }
+        }
+    }
+
     # Version 2/3 caches stored thousands of bulk names locally. Keep only exact
     # profiles now that bulk ratings live in the pseudonymous shared table.
-    $now = Get-UnixTime
     foreach ($key in @($Cache.players.Keys)) {
         if ([int64]$Cache.players[$key].exactFetchedAt -le 0 -and
             [int64]$Cache.players[$key].notFoundUntil -le $now) {
@@ -659,13 +725,15 @@ function Sync-SharedSnapshot {
     Set-CacheSeason -Cache $Cache -Season $season
     foreach ($player in @($Cache.players.Values)) {
         $player.current = @{}
-        $player.previous = @{}
+        if (-not $legacy) { $player.previous = @{} }
         $hash = Get-LookupHash -Name ([string]$player.name) -Realm ([string]$player.realm)
         if ($null -eq $hash -or -not $newSharedPlayers.ContainsKey($hash)) {
             continue
         }
         $sharedCurrent = $newSharedPlayers[$hash].current
-        $player.previous = Convert-SharedRatingMap $newSharedPlayers[$hash].previous
+        if (-not $legacy -or $newSharedPlayers[$hash].previous.Count -gt 0) {
+            $player.previous = Convert-SharedRatingMap $newSharedPlayers[$hash].previous
+        }
         foreach ($bracket in @(2, 3, 5)) {
             $key = [string]$bracket
             if ($sharedCurrent.ContainsKey($key)) {
@@ -677,8 +745,8 @@ function Sync-SharedSnapshot {
     $Cache.currentSeason = $season
     Merge-Cutoffs -Cache $Cache -Object (Get-ObjectProperty $snapshot 'cutoffs')
     $Cache.sharedPlayers = $newSharedPlayers
-    $Cache.sharedGenerated = [int64]((Get-ObjectProperty $snapshot 'generated') -as [int64])
-    $Cache.lastLeaderboardUpdated = [int64]((Get-ObjectProperty $snapshot 'leaderboardUpdated') -as [int64])
+    $Cache.sharedGenerated = $generated
+    $Cache.lastLeaderboardUpdated = $updated
     $snapshotCounts = Get-ObjectProperty $snapshot 'counts'
     foreach ($realm in @('Nightslayer', 'Dreamscythe')) {
         $count = 0
@@ -686,8 +754,26 @@ function Sync-SharedSnapshot {
             $Cache.sharedCounts[$realm] = [Math]::Max(0, $count)
         }
     }
-    $Cache.syncedSeasons = $(if ($season -gt 1) { @(1..($season - 1)) } else { @() })
-    Write-Log ('Shared snapshot: loaded {0} pseudonymous Nightslayer and Dreamscythe rows.' -f $merged)
+    if (-not $legacy) {
+        $Cache.syncedSeasons = $(if ($season -gt 1) { @(1..($season - 1)) } else { @() })
+    }
+    Write-Log ('{0}: loaded {1} pseudonymous rows (format v{2}).' -f $SourceLabel, $merged, $version)
+    return $true
+}
+
+function Test-LeaderboardPayload {
+    param($Payload)
+
+    if ($null -eq $Payload -or [bool](Get-ObjectProperty $Payload '__nsrTransientError')) { return $false }
+    $rows = @(Get-ObjectProperty $Payload 'data' | Where-Object { $null -ne $_ })
+    if ($rows.Count -eq 0) { return $false }
+    foreach ($row in $rows) {
+        $rating = 0
+        if (-not [int]::TryParse([string](Get-ObjectProperty $row 'rating'), [ref]$rating) -or
+            $rating -lt 0 -or $rating -gt 10000 -or
+            [string]::IsNullOrWhiteSpace([string](Get-ObjectProperty $row 'name')) -or
+            [string]::IsNullOrWhiteSpace([string](Get-ObjectProperty $row 'server'))) { return $false }
+    }
     return $true
 }
 
@@ -712,9 +798,16 @@ function Sync-LeaderboardSeason {
     $complete = $true
 
     foreach ($bracket in @(2, 3, 5)) {
-        $payload = Get-Leaderboard -Season $Season -Bracket $bracket
+        try {
+            $payload = Get-Leaderboard -Season $Season -Bracket $bracket
+        } catch {
+            Write-Log ('Season {0} {1}v{1} unavailable; keeping cached ratings. {2}' -f $Season, $bracket, $_.Exception.Message)
+            $complete = $false
+            continue
+        }
         $rows = @(Get-ObjectProperty $payload 'data')
-        if ($null -eq $payload -or $rows.Count -eq 0) {
+        if (-not (Test-LeaderboardPayload $payload)) {
+            Write-Log ('Season {0} {1}v{1} returned no usable leaderboard; keeping cached ratings.' -f $Season, $bracket)
             $complete = $false
             continue
         }
@@ -725,6 +818,10 @@ function Sync-LeaderboardSeason {
                     $map = $(if ($IsCurrent) { $cachedPlayer.current } else { $cachedPlayer.previous })
                     [void]$map.Remove([string]$bracket)
                 }
+            }
+            foreach ($sharedPlayer in $Cache.sharedPlayers.Values) {
+                $map = $(if ($IsCurrent) { $sharedPlayer.current } else { $sharedPlayer.previous })
+                [void]$map.Remove([string]$bracket)
             }
         }
 
@@ -762,6 +859,17 @@ function Sync-LeaderboardSeason {
             if ($rating -gt $previousBest) {
                 $player.bestSeen[[string]$bracket] = $rating
             }
+            $hash = Get-LookupHash -Name $name -Realm $canonicalRealm
+            if ($null -ne $hash) {
+                if (-not $Cache.sharedPlayers.ContainsKey($hash)) {
+                    $Cache.sharedPlayers[$hash] = @{ current = @{}; bestSeen = @{}; previous = @{} }
+                    $Cache.sharedCounts[$canonicalRealm]++
+                }
+                $shared = $Cache.sharedPlayers[$hash]
+                if ($IsCurrent) { $shared.current[[string]$bracket] = $rating }
+                elseif ($Season -eq $Cache.previousSeason) { $shared.previous[[string]$bracket] = $rating }
+                $shared.bestSeen[[string]$bracket] = [Math]::Max($rating, (Get-CachedRating $shared.bestSeen $bracket))
+            }
             $matched++
             $realmMatches[$canonicalRealm]++
         }
@@ -785,9 +893,13 @@ function Find-CurrentSeason {
     $season = [Math]::Max(1, [int]$Cache.currentSeason)
     while ($season -lt 20) {
         $nextSeason = $season + 1
-        $probe = Get-Leaderboard -Season $nextSeason -Bracket 2 -Probe
-        $rows = @(Get-ObjectProperty $probe 'data')
-        if ($null -eq $probe -or $rows.Count -eq 0) {
+        try {
+            $probe = Get-Leaderboard -Season $nextSeason -Bracket 2 -Probe
+        } catch {
+            Write-Log ('Season discovery unavailable; keeping season {0}. {1}' -f $season, $_.Exception.Message)
+            break
+        }
+        if (-not (Test-LeaderboardPayload $probe)) {
             break
         }
         $season = $nextSeason
@@ -1157,6 +1269,43 @@ function Write-LuaData {
     return $outputPlayers.Count + $Cache.sharedPlayers.Count
 }
 
+function Update-RatingData {
+    param([hashtable]$Cache, [string]$GamePath, [string]$AddonDirectory)
+
+    Initialize-BundledSnapshot -Cache $Cache
+    $sharedWorked = Sync-SharedSnapshot -Cache $Cache
+    if (-not $sharedWorked) {
+        $currentSeason = Find-CurrentSeason -Cache $Cache
+        Set-CacheSeason -Cache $Cache -Season $currentSeason
+        # Each successful bracket replaces only its own cached values. A 500,
+        # missing future season, or malformed response never clears good data.
+        [void](Sync-LeaderboardSeason -Cache $Cache -Season $currentSeason -IsCurrent $true)
+        for ($season = 1; $season -lt $currentSeason; $season++) {
+            if (@($Cache.syncedSeasons) -contains $season) { continue }
+            if (Sync-LeaderboardSeason -Cache $Cache -Season $season -IsCurrent $false) {
+                $Cache.syncedSeasons = @($Cache.syncedSeasons) + $season
+            }
+        }
+    }
+
+    Sync-RatingCutoffs -Cache $Cache
+    $profiles = Sync-QueuedProfiles -Cache $Cache -GamePath $GamePath
+    Save-Cache -Cache $Cache
+    $hasRatings = $Cache.sharedPlayers.Count -gt 0
+    foreach ($player in $Cache.players.Values) {
+        if ($player.current.Count -gt 0 -or $player.bestSeen.Count -gt 0 -or $player.exactBest.Count -gt 0) {
+            $hasRatings = $true
+            break
+        }
+    }
+    if ($hasRatings) {
+        $playersWritten = Write-LuaData -Cache $Cache -AddonDirectory $AddonDirectory
+        Write-Log ('Sync complete: {0} cached players written, {1} exact profile lookups.' -f $playersWritten, $profiles)
+    } else {
+        Write-Log 'No rating data was available. Existing addon data was left unchanged; the next scheduled run will retry.'
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($WowPath)) {
     if (-not (Test-Path -LiteralPath $ConfigPath)) {
         throw 'No WoW path is configured. Run Install.cmd again.'
@@ -1185,36 +1334,7 @@ try {
     Write-Log 'Starting shared IronForge rating sync.'
 
     $cache = Read-Cache
-    $sharedWorked = Sync-SharedSnapshot -Cache $cache
-    if (-not $sharedWorked) {
-        # Do not let an older shared row mask the fresher direct fallback below.
-        if ($cache.sharedPlayers.Count -gt 0) { $cache.syncedSeasons = @() }
-        $cache.sharedPlayers = @{}
-        $cache.sharedCounts = @{ Nightslayer = 0; Dreamscythe = 0 }
-        $cache.sharedGenerated = 0
-        $currentSeason = Find-CurrentSeason -Cache $cache
-        Set-CacheSeason -Cache $cache -Season $currentSeason
-
-        [void](Sync-LeaderboardSeason -Cache $cache -Season $currentSeason -IsCurrent $true)
-
-        for ($season = 1; $season -lt $currentSeason; $season++) {
-            if (@($cache.syncedSeasons) -contains $season) {
-                continue
-            }
-
-            $complete = Sync-LeaderboardSeason -Cache $cache -Season $season -IsCurrent $false
-            if ($complete) {
-                $cache.syncedSeasons = @($cache.syncedSeasons) + $season
-            }
-        }
-    }
-
-    Sync-RatingCutoffs -Cache $cache
-    $profiles = Sync-QueuedProfiles -Cache $cache -GamePath $WowPath
-    Save-Cache -Cache $cache
-    $playersWritten = Write-LuaData -Cache $cache -AddonDirectory $AddonPath
-
-    Write-Log ('Sync complete: {0} players written, {1} exact profile lookups.' -f $playersWritten, $profiles)
+    Update-RatingData -Cache $cache -GamePath $WowPath -AddonDirectory $AddonPath
 } catch {
     Write-Log ('ERROR: ' + $_.Exception.Message)
     if (-not $Quiet) {
