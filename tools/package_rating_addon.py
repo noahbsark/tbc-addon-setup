@@ -34,6 +34,7 @@ def validate_snapshot(snapshot):
     players = snapshot["players"]
     if not isinstance(players, dict) or len(players) > 100000:
         raise ValueError("Invalid snapshot player table")
+    validate_profile = publisher_module().profile_state
     for key, player in players.items():
         if not re.fullmatch(r"[a-f0-9]{16}", key) or not isinstance(player, dict):
             raise ValueError("Invalid snapshot player")
@@ -42,6 +43,7 @@ def validate_snapshot(snapshot):
             if not isinstance(ratings, dict) or any(str(b) not in ("2", "3", "5") or type(r) is not int or
                                                    not 0 <= r <= 10000 for b, r in ratings.items()):
                 raise ValueError("Invalid rating map")
+        validate_profile(player, int(time.time()))
     counts = snapshot.get("counts", {})
     if set(counts) != {"Nightslayer", "Dreamscythe"} or any(type(v) is not int or v < 0 for v in counts.values()) or sum(counts.values()) != len(players):
         raise ValueError("Snapshot realm counts do not match its players")

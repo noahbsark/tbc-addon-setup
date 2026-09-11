@@ -3,6 +3,8 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import time
+import urllib.error
 from unittest import mock
 from pathlib import Path
 
@@ -71,6 +73,92 @@ class SeasonThreeClient:
 
 
 class SharedCacheTests(unittest.TestCase):
+    def test_shared_peaks_resume_without_refetching_or_exposing_names(self):
+        client = FakeClient()
+        client.get_profile = mock.Mock(return_value={"bracket_best": {"2": 2700, "3": 2200, "10": 0}})
+        first = MODULE.build_snapshot(client, profile_limit=1)
+        self.assertEqual(first["profiles"]["fetched"], 1)
+        self.assertEqual(first["profiles"]["state"], "budget")
+        completed = next(key for key, row in first["players"].items() if row["exactFetchedAt"])
+        original_stamp = first["players"][completed]["exactFetchedAt"]
+        second = MODULE.build_snapshot(client, first, profile_limit=1)
+        self.assertEqual(client.get_profile.call_count, 2)
+        self.assertNotEqual(client.get_profile.call_args_list[0], client.get_profile.call_args_list[1])
+        self.assertEqual(second["profiles"]["cached"], 2)
+        self.assertEqual(second["players"][completed]["exactFetchedAt"], original_stamp)
+        third = MODULE.build_snapshot(client, second, profile_limit=100)
+        self.assertEqual(client.get_profile.call_count, 2)
+        self.assertEqual(third["profiles"]["attempted"], 0)
+        self.assertNotIn("Twinname", json.dumps(third))
+        self.assertNotIn("10", third["players"][completed]["exactBest"])
+        self.assertIn("exactBest = { [2] = 2700, [3] = 2200 }", MODULE.render_lua(third))
+
+    def test_old_shared_peaks_survive_failures_and_older_values(self):
+        client = FakeClient()
+        client.get_profile = mock.Mock(return_value={"bracket_best": {"2": 2700}})
+        previous = MODULE.build_snapshot(client, profile_limit=100)
+        for row in previous["players"].values():
+            row["exactFetchedAt"] = int(time.time()) - 8 * 86400
+        client.get_profile.side_effect = urllib.error.HTTPError("profile", 429, "slow down", {}, None)
+        result = MODULE.build_snapshot(client, previous, profile_limit=100)
+        self.assertEqual(result["profiles"]["attempted"], 1)
+        self.assertEqual(result["profiles"]["state"], "throttled")
+        self.assertTrue(all(row["exactBest"]["2"] == 2700 for row in result["players"].values()))
+        client.get_profile.side_effect = None
+        client.get_profile.return_value = {"bracket_best": {"2": 2500}}
+        result = MODULE.build_snapshot(client, previous, profile_limit=100)
+        self.assertTrue(all(row["exactBest"]["2"] == 2700 for row in result["players"].values()))
+
+    def test_missing_invalid_and_time_budget_do_not_repeat_requests(self):
+        client = FakeClient()
+        client.get_profile = mock.Mock(side_effect=urllib.error.HTTPError("profile", 404, "missing", {}, None))
+        first = MODULE.build_snapshot(client, profile_limit=100)
+        self.assertEqual(first["profiles"]["unavailable"], 2)
+        second = MODULE.build_snapshot(client, first, profile_limit=100)
+        self.assertEqual(second["profiles"]["attempted"], 0)
+        self.assertEqual(client.get_profile.call_count, 2)
+        client.get_profile.side_effect = None
+        client.get_profile.return_value = {"bracket_best": {"2": "bad"}}
+        invalid = MODULE.build_snapshot(client, profile_limit=100)
+        self.assertEqual(invalid["profiles"]["failed"], 2)
+        self.assertEqual(invalid["profiles"]["cached"], 0)
+        result = MODULE.build_snapshot(client, profile_limit=100, profile_seconds=0)
+        self.assertEqual(result["profiles"]["attempted"], 0)
+        self.assertEqual(result["profiles"]["state"], "budget")
+
+    def test_five_errors_stop_collector_and_untried_players_go_next(self):
+        now = int(time.time())
+        rows = {str(i): {"current": {"2": 1500}} for i in range(12)}
+        snapshot = {"players": rows, "season": 3}
+        identities = {key: ("Nightslayer", "Example") for key in rows}
+        client = FakeClient()
+        client.get_profile = mock.Mock(side_effect=TimeoutError())
+        MODULE.enrich_profiles(client, snapshot, identities, None, 100, 480)
+        self.assertEqual(snapshot["profiles"]["attempted"], 5)
+        self.assertEqual(snapshot["profiles"]["state"], "paused")
+        previous = {**snapshot, "version": 6, "keyAlgorithm": MODULE.HASH_ALGORITHM,
+                    "region": "US", "generated": now}
+        next_snapshot = {"players": {key: {"current": {"2": 1500}} for key in rows}, "season": 3}
+        client.get_profile.side_effect = None
+        client.get_profile.return_value = {"bracket_best": {"2": 1800}}
+        MODULE.enrich_profiles(client, next_snapshot, identities, previous, 100, 480)
+        self.assertEqual(next_snapshot["profiles"]["fetched"], 7)
+
+    def test_departed_player_retains_peak_without_fresh_current_rating(self):
+        client = FakeClient()
+        client.get_profile = mock.Mock(return_value={"bracket_best": {"2": 2700}})
+        previous = MODULE.build_snapshot(client, profile_limit=100)
+        key = MODULE.lookup_hash("Nightslayer", "Departed")
+        previous["players"][key] = {"realm": "Nightslayer", "exactBest": {"2": 3000},
+                                     "exactFetchedAt": int(time.time()), "current": {"2": 2000}}
+        result = MODULE.build_snapshot(client, previous, profile_limit=100)
+        self.assertEqual(result["players"][key]["exactBest"], {"2": 3000})
+        self.assertEqual(result["players"][key]["current"], {})
+        self.assertEqual(sum(result["counts"].values()), len(result["players"]))
+        previous["players"][key]["exactFetchedAt"] = int(time.time()) + 7200
+        with self.assertRaises(ValueError):
+            MODULE.build_snapshot(client, previous, profile_limit=100)
+
     def test_two_realms_are_distinct_and_names_are_not_published(self):
         snapshot = MODULE.build_snapshot(FakeClient())
         players = snapshot["players"]

@@ -339,6 +339,18 @@ local function LookupRecord(name, realm)
 
     local sharedKey = SharedLookupKey(name, realm)
     local sharedRecord = sharedKey and data.sharedPlayers and data.sharedPlayers[sharedKey]
+    if sharedRecord and (tonumber(sharedRecord.exactFetchedAt) or 0) > 0 and not sharedRecord.exact then
+        sharedRecord.best, sharedRecord.exactBrackets = {}, {}
+        sharedRecord.exact, sharedRecord.exactSource = true, "shared"
+        for _, bracket in ipairs(BRACKETS) do
+            local observed = math.max(tonumber(sharedRecord[SHARED_CURRENT_INDEX[bracket]]) or 0,
+                tonumber(sharedRecord[SHARED_BEST_INDEX[bracket]]) or 0)
+            local peaks = sharedRecord.exactBest or {}
+            local peak = tonumber(peaks[bracket] or peaks[tostring(bracket)]) or 0
+            sharedRecord.best[bracket] = math.max(observed, peak)
+            sharedRecord.exactBrackets[bracket] = peak > 0 and peak >= observed
+        end
+    end
     return sharedRecord or localRecord
 end
 
@@ -953,7 +965,7 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         local players = realmCounts.Nightslayer + realmCounts.Dreamscythe
 
         print(string.format(
-            "|cffffd200Nightslayer Rating:|r %d cached players (%d Nightslayer, %d Dreamscythe), %d exact lifetime highs, season %s, exact lookup %s",
+            "|cffffd200Nightslayer Rating:|r %d cached players (%d Nightslayer, %d Dreamscythe), %d tracked peak profiles, season %s, profile lookup %s",
             players,
             realmCounts.Nightslayer,
             realmCounts.Dreamscythe,
