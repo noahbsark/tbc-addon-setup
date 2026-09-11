@@ -1,6 +1,7 @@
 name: Test rating addon
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     paths:
@@ -8,11 +9,13 @@ on:
       - "nightslayer-rating/source/**"
       - "nightslayer-rating/tests/**"
       - "central-rating-data/**"
+      - "tools/*rating*.py"
   pull_request:
     paths:
       - ".github/workflows/test-rating-addon.yml"
       - "nightslayer-rating/**"
       - "central-rating-data/**"
+      - "tools/*rating*.py"
 
 permissions:
   contents: read
@@ -33,6 +36,7 @@ jobs:
           sudo apt-get install -y lua5.1
           lua5.1 nightslayer-rating/tests/test_rating_colors.lua
           lua5.1 nightslayer-rating/tests/test_usability.lua
+          lua5.1 nightslayer-rating/tests/test_player_search.lua
   windows-integration:
     runs-on: windows-latest
     timeout-minutes: 10
@@ -74,4 +78,5 @@ jobs:
         run: |
           ./nightslayer-rating/tests/test_updater.ps1
           ./nightslayer-rating/tests/test_profile_refresh.ps1
+          ./nightslayer-rating/tests/test_rating_history.ps1
           ./nightslayer-rating/tests/test_upgrade.ps1

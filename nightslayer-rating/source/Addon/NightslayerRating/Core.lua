@@ -333,7 +333,7 @@ local function LookupRecord(name, realm)
     end
 
     local localRecord = playerIndex[key] or lowerIndex[key]
-    if localRecord and localRecord.exact == true then
+    if localRecord and (localRecord.exact == true or localRecord.tracking == true) then
         return localRecord
     end
 
@@ -411,14 +411,56 @@ local function HasBracketRating(record, bracket)
 end
 
 local function BracketSummary(record, bracket)
+    local lastKnown, age = UI.CurrentInfo(data, record, bracket)
+    local current = CurrentRating(record, bracket)
     local parts = {
-        "Current S" .. CurrentSeason() .. " " ..
-            ColoredRating(CurrentRating(record, bracket), bracket, CurrentSeason()),
+        (lastKnown and (tonumber(current) or 0) > 0 and "Last known S" or "Current S") .. CurrentSeason() .. " " ..
+            ColoredRating(current, bracket, CurrentSeason()) ..
+            (lastKnown and (tonumber(current) or 0) > 0 and (" (" .. age .. ")") or ""),
     }
     parts[#parts + 1] = (ExactRating(record, bracket) and "Peak " or "Observed ") ..
         ColoredRating(BestRating(record, bracket), bracket, PEAK_COMPARISON_SEASON) ..
         (ExactRating(record, bracket) and "" or "*")
     return table.concat(parts, "   ")
+end
+
+function UI.FindPlayer(query)
+    query = type(query) == "string" and query:match("^%s*(.-)%s*$") or ""
+    local name, realm = SplitPlayerName(query)
+    if not query:find("-", 1, true) and type(GetRealmName) == "function" then
+        realm = ResolveRealm(GetRealmName()) or DEFAULT_REALM
+    end
+    realm = ResolveRealm(realm)
+    if not name or name == "" or #name > 48 or name:find("[%s%p%d%c]") or not realm then
+        return { "Enter a character name, optionally followed by -Nightslayer or -Dreamscythe." }
+    end
+    QueuePlayer(name .. "-" .. realm, true)
+    local record = LookupRecord(name, realm)
+    local lines = { "|cffffd200" .. name .. "-" .. realm .. "|r", UI.ProfileStatus(record, AutomaticExactLookupAvailable()) }
+    local title = Titles.Line(name, realm, true)
+    if title then
+        lines[#lines + 1] = title
+        lines[#lines + 1] = "Highest confirmed observation on this client; other titles may be unknown."
+    end
+    if not record then
+        lines[#lines + 1] = "No cached rating. Missing data does not mean a zero rating."
+    else
+        for _, bracket in ipairs(BRACKETS) do
+            if UI.Bracket(bracket) then
+                local _, age = UI.CurrentInfo(data, record, bracket)
+                lines[#lines + 1] = " "
+                lines[#lines + 1] = bracket .. "v" .. bracket .. "   " .. BracketSummary(record, bracket)
+                lines[#lines + 1] = "Rating source: " .. age
+                lines[#lines + 1] = UI.HistoryLine(record, bracket)
+                local cutoff = UI.Settings().nextCutoff and Colors.NextCutoff(data, CurrentRating(record, bracket), bracket)
+                if cutoff then lines[#lines + 1] = cutoff end
+            end
+        end
+        lines[#lines + 1] = " "
+        lines[#lines + 1] = "Peak colors use frozen S2 cutoffs. Observed* means a confirmed lifetime peak is unavailable."
+    end
+    for _, line in ipairs(UI.StatusLines(data, false, record)) do lines[#lines + 1] = line end
+    return lines
 end
 
 local function ShowWhisperRating(fullName)
@@ -534,6 +576,10 @@ local function AddRatingLines(tooltip, fullName, resultID)
             )
             local right = BracketSummary(record, bracket)
             tooltip:AddDoubleLine(left, right, 0.35, 0.75, 1.00, 0.80, 0.80, 0.80)
+            if details then
+                local _, age = UI.CurrentInfo(data, record, bracket)
+                tooltip:AddLine("Rating source: " .. age .. "; " .. UI.HistoryLine(record, bracket), 0.65, 0.65, 0.65)
+            end
             if details and UI.Settings().nextCutoff then
                 local nextCutoff = Colors.NextCutoff(data, current, bracket)
                 if nextCutoff then tooltip:AddLine(nextCutoff, 0.65, 0.65, 0.65) end
@@ -658,6 +704,10 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
                     1.00,
                     1.00,
                 }
+                if details then
+                    local _, age = UI.CurrentInfo(data, record, bracket)
+                    displayLines[#displayLines + 1] = { "Rating source: " .. age .. "; " .. UI.HistoryLine(record, bracket), 0.65, 0.65, 0.65 }
+                end
                 if details and UI.Settings().nextCutoff then
                     local nextCutoff = Colors.NextCutoff(data, current, bracket)
                     if nextCutoff then displayLines[#displayLines + 1] = { nextCutoff, 0.65, 0.65, 0.65 } end
@@ -872,16 +922,8 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
             end
         end
         print("Current uses current-season cutoffs. Lifetime Peak/Observed uses frozen S2 cutoffs as a color guide, not an earned-title claim.")
-    elseif command == "lookup" and rest ~= "" then
-        if QueuePlayer(rest, true) then
-            if AutomaticExactLookupAvailable() then
-                print("|cffffd200Nightslayer Rating:|r queued " .. rest .. " for automatic exact lookup")
-            else
-                print("|cffffd200Nightslayer Rating:|r saved " .. rest .. "; the Windows companion is required for exact lookup")
-            end
-        else
-            print("|cffffd200Nightslayer Rating:|r use NAME or NAME-Nightslayer/Dreamscythe")
-        end
+    elseif command == "lookup" or command == "search" then
+        UI.OpenSearch(rest)
     elseif command == "upgrade" then
         print("|cffffd200Nightslayer Rating:|r close WoW and run Upgrade.cmd from the Windows bundle or the Nightslayer Rating folder in your Start menu.")
     else
@@ -918,6 +960,6 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         ))
         print("Installed version: " .. UI.version)
         for _, line in ipairs(UI.StatusLines(data, true)) do print(line) end
-        print("Commands: /nsr options, /nsr status, /nsr on, /nsr off, /nsr cutoffs, /nsr lookup NAME[-REALM], /nsr upgrade")
+        print("Commands: /nsr search [NAME-REALM], /nsr options, /nsr status, /nsr on, /nsr off, /nsr cutoffs, /nsr lookup [NAME-REALM], /nsr upgrade")
     end
 end

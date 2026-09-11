@@ -12,4 +12,6 @@ RatingColors.lua
 Options.lua
 TitleTracker.lua
 Status.lua
+PlayerDetails.lua
+Search.lua
 Core.lua

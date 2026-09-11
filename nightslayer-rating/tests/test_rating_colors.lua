@@ -78,12 +78,14 @@ data.players = {
     ["Nightslayer|Twinname"] = {
         name = "Twinname", realm = "Nightslayer", exact = true,
         current = { [2] = 2058 }, previous = { [2] = 2481 }, best = { [2] = 2900 },
+        currentUpdated = { [2] = time() },
     },
 }
 NightslayerRatingData = data
 dofile(addon .. "Options.lua")
 dofile(addon .. "TitleTracker.lua")
 dofile(addon .. "Status.lua")
+dofile(addon .. "PlayerDetails.lua")
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(#messages == 1)
@@ -116,6 +118,7 @@ assert(messages[3]:find("Inactive", 1, true))
 data.players = { ["Nightslayer|Twinname"] = {
     name = "Twinname", realm = "Nightslayer", exact = true,
     current = { [2] = 2400, [3] = 2400, [5] = 2400 },
+    currentUpdated = { [2] = time(), [3] = time(), [5] = time() },
     best = { [2] = 2400, [3] = 2400, [5] = 2400 },
 } }
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
