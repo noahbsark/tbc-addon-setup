@@ -15,6 +15,8 @@ local SHARED_CURRENT_INDEX = { [2] = 1, [3] = 2, [5] = 3 }
 local SHARED_BEST_INDEX = { [2] = 4, [3] = 5, [5] = 6 }
 local PEAK_COMPARISON_SEASON = 2
 local Colors = NightslayerRatingColors
+local UI = NightslayerRatingUI
+local Titles = NightslayerRatingTitles
 
 local data = NightslayerRatingData or {
     meta = { realm = DEFAULT_REALM, region = "US", season = 0, generated = 0 },
@@ -392,8 +394,8 @@ local function RatingBandLabel(current, bracket)
 end
 
 local function HasBracketRating(record, bracket)
-    return (tonumber(CurrentRating(record, bracket)) or 0) > 0 or
-        (tonumber(BestRating(record, bracket)) or 0) > 0
+    return UI.Bracket(bracket) and ((tonumber(CurrentRating(record, bracket)) or 0) > 0 or
+        (tonumber(BestRating(record, bracket)) or 0) > 0)
 end
 
 local function BracketSummary(record, bracket)
@@ -408,7 +410,7 @@ local function BracketSummary(record, bracket)
 end
 
 local function ShowWhisperRating(fullName)
-    if not NightslayerRatingSettings.enabled then
+    if not UI.Enabled("whispers") then
         return
     end
 
@@ -433,12 +435,14 @@ local function ShowWhisperRating(fullName)
     end
     local prefix = "|cffffd200[NSR]|r " .. displayName .. ": "
     local record = LookupRecord(name, canonicalRealm)
+    local title = Titles.Line(name, canonicalRealm)
     if not record then
         if AutomaticExactLookupAvailable() then
             DEFAULT_CHAT_FRAME:AddMessage(prefix .. "rating not cached yet; exact lookup queued")
         else
             DEFAULT_CHAT_FRAME:AddMessage(prefix .. "not in the packaged leaderboard cache")
         end
+        if title then DEFAULT_CHAT_FRAME:AddMessage(prefix .. title) end
         return
     end
 
@@ -456,6 +460,7 @@ local function ShowWhisperRating(fullName)
             )
         end
     end
+    if title then parts[#parts + 1] = title end
 
     if #parts == 0 then
         DEFAULT_CHAT_FRAME:AddMessage(prefix .. "no tracked arena rating")
@@ -465,7 +470,8 @@ local function ShowWhisperRating(fullName)
 end
 
 local function AddRatingLines(tooltip, fullName, resultID)
-    if not NightslayerRatingSettings.enabled or not tooltip or not tooltip:IsShown() then
+    local surface = type(resultID) == "string" and resultID:match("^unit:") and "units" or "groupFinder"
+    if not UI.Enabled(surface) or not tooltip or not tooltip:IsShown() then
         return
     end
 
@@ -486,6 +492,9 @@ local function AddRatingLines(tooltip, fullName, resultID)
     local record = LookupRecord(name, canonicalRealm)
     tooltip:AddLine(" ")
     tooltip:AddLine("IronForge Rating |cff9d9d9d- " .. canonicalRealm .. "|r", 1.00, 0.82, 0.00)
+    local details = UI.Details()
+    local title = Titles.Line(name, canonicalRealm, details)
+    if title then tooltip:AddLine(title, 0.80, 0.80, 0.80) end
 
     if not record then
         tooltip:AddLine("Current rating not cached yet", 0.75, 0.75, 0.75)
@@ -513,6 +522,10 @@ local function AddRatingLines(tooltip, fullName, resultID)
             )
             local right = BracketSummary(record, bracket)
             tooltip:AddDoubleLine(left, right, 0.35, 0.75, 1.00, 0.80, 0.80, 0.80)
+            if details and UI.Settings().nextCutoff then
+                local nextCutoff = Colors.NextCutoff(data, current, bracket)
+                if nextCutoff then tooltip:AddLine(nextCutoff, 0.65, 0.65, 0.65) end
+            end
         end
     end
 
@@ -526,11 +539,9 @@ local function AddRatingLines(tooltip, fullName, resultID)
         end
     end
 
-    tooltip:AddLine(Colors.Status(data), 0.55, 0.55, 0.55)
-    local generated = data.meta and tonumber(data.meta.generated)
-    if generated and generated > 0 then
-        tooltip:AddLine("Synced " .. date("%Y-%m-%d %H:%M", generated), 0.45, 0.45, 0.45)
-    end
+    for _, line in ipairs(UI.StatusLines(data, details, record)) do tooltip:AddLine(line, 0.55, 0.55, 0.55) end
+    if not details then tooltip:AddLine("Shift-hover for details", 0.45, 0.45, 0.45) end
+    if title and details then tooltip:AddLine("Known from this client's observations; other titles may be unknown.", 0.55, 0.55, 0.55) end
 
     tooltip:Show()
 end
@@ -588,7 +599,7 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
     end
 
     HideVanillaRatingLines(tooltip)
-    if not NightslayerRatingSettings.enabled then
+    if not UI.Enabled("groupFinder") then
         return
     end
 
@@ -604,6 +615,9 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
         { "IronForge Rating - " .. canonicalRealm, 1.00, 0.82, 0.00 },
     }
     local record = LookupRecord(name, canonicalRealm)
+    local details = UI.Details()
+    local title = Titles.Line(name, canonicalRealm, details)
+    if title then displayLines[#displayLines + 1] = { title, 0.80, 0.80, 0.80 } end
 
     if not record then
         displayLines[#displayLines + 1] = { "Current rating not cached yet", 0.75, 0.75, 0.75 }
@@ -632,6 +646,10 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
                     1.00,
                     1.00,
                 }
+                if details and UI.Settings().nextCutoff then
+                    local nextCutoff = Colors.NextCutoff(data, current, bracket)
+                    if nextCutoff then displayLines[#displayLines + 1] = { nextCutoff, 0.65, 0.65, 0.65 } end
+                end
             end
         end
 
@@ -649,7 +667,10 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
         end
     end
 
-    displayLines[#displayLines + 1] = { Colors.Status(data), 0.55, 0.55, 0.55 }
+    for _, line in ipairs(UI.StatusLines(data, details, record)) do
+        displayLines[#displayLines + 1] = { line, 0.55, 0.55, 0.55 }
+    end
+    if not details then displayLines[#displayLines + 1] = { "Shift-hover for details", 0.45, 0.45, 0.45 } end
     local baseHeight = tooltip:GetHeight()
     local baseWidth = tooltip:GetWidth()
     local lineHeight = 14
@@ -753,6 +774,7 @@ GameTooltip:HookScript("OnTooltipSetUnit", function(tooltip)
 
         local fullName, unitToken = PlayerNameFromUnitTooltip(tooltip)
         if fullName then
+            Titles.Observe(unitToken)
             AddRatingLines(tooltip, fullName, "unit:" .. unitToken)
         end
     end)
@@ -783,6 +805,8 @@ eventFrame:RegisterEvent("LFG_LIST_SEARCH_RESULTS_RECEIVED")
 eventFrame:RegisterEvent("LFG_LIST_SEARCH_RESULT_UPDATED")
 eventFrame:RegisterEvent("CHAT_MSG_WHISPER")
 eventFrame:RegisterEvent("CHAT_MSG_WHISPER_INFORM")
+eventFrame:RegisterEvent("KNOWN_TITLES_UPDATE")
+eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "ADDON_LOADED" then
         if arg1 == ADDON_NAME or arg1 == "Blizzard_GroupFinder" or arg1 == "Blizzard_GroupFinder_VanillaStyle" then
@@ -790,6 +814,16 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
         end
     elseif event == "PLAYER_LOGIN" then
         InstallHooks()
+        Titles.Prune()
+        Titles.Observe("player")
+        local sync = NightslayerRatingSyncStatus or {}
+        if UI.Enabled() and UI.NewerVersion(sync.availableVersion, UI.version) then
+            print("|cffffd200Nightslayer Rating:|r version " .. sync.availableVersion .. " available. Close WoW and run Upgrade.cmd in Windows.")
+        end
+    elseif event == "KNOWN_TITLES_UPDATE" then
+        Titles.Observe("player")
+    elseif event == "PLAYER_TARGET_CHANGED" then
+        Titles.Observe("target")
     elseif event == "LFG_LIST_SEARCH_RESULTS_RECEIVED" then
         C_Timer.After(0.2, TrackSearchResults)
     elseif event == "LFG_LIST_SEARCH_RESULT_UPDATED" then
@@ -808,7 +842,9 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
     local command, rest = message:match("^(%S+)%s*(.-)$")
     command = command and string.lower(command) or "status"
 
-    if command == "on" then
+    if command == "options" or command == "settings" then
+        UI.OpenOptions()
+    elseif command == "on" then
         NightslayerRatingSettings.enabled = true
         print("|cffffd200Nightslayer Rating:|r enabled")
     elseif command == "off" then
@@ -834,6 +870,8 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         else
             print("|cffffd200Nightslayer Rating:|r use NAME or NAME-Nightslayer/Dreamscythe")
         end
+    elseif command == "upgrade" then
+        print("|cffffd200Nightslayer Rating:|r close WoW and run Upgrade.cmd from the Windows bundle or the Nightslayer Rating folder in your Start menu.")
     else
         local exact = 0
         local realmCounts = { Nightslayer = 0, Dreamscythe = 0 }
@@ -866,7 +904,8 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
             tostring((data.meta and data.meta.season) or "?"),
             AutomaticExactLookupAvailable() and "automatic" or "requires Windows companion"
         ))
-        print(Colors.Status(data))
-        print("Commands: /nsr on, /nsr off, /nsr cutoffs, /nsr lookup NAME[-REALM]")
+        print("Installed version: " .. UI.version)
+        for _, line in ipairs(UI.StatusLines(data, true)) do print(line) end
+        print("Commands: /nsr options, /nsr status, /nsr on, /nsr off, /nsr cutoffs, /nsr lookup NAME[-REALM], /nsr upgrade")
     end
 end

@@ -51,3 +51,6 @@ if ((Split-Path -Leaf $UpdaterDirectory) -eq 'NightslayerRating' -and (Test-Path
 }
 
 Write-Host 'Nightslayer Rating has been uninstalled.' -ForegroundColor Green
+$shortcutFolder = Join-Path ([Environment]::GetFolderPath('Programs')) 'Nightslayer Rating'
+if (Test-Path -LiteralPath $shortcutFolder) { Remove-Item -LiteralPath $shortcutFolder -Recurse -Force }
+Write-Host 'Installation backups, if any, remain in %LOCALAPPDATA%\NightslayerRatingBackups.'

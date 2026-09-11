@@ -81,6 +81,9 @@ data.players = {
     },
 }
 NightslayerRatingData = data
+dofile(addon .. "Options.lua")
+dofile(addon .. "TitleTracker.lua")
+dofile(addon .. "Status.lua")
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(#messages == 1)
@@ -126,4 +129,28 @@ assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(messages[5]:find("Current S3 |cffa335ee2400|r", 1, true))
 assert(messages[5]:find("Peak |cff0070dd2400|r", 1, true))
+
+-- Preferences gate the actual event handlers without suppressing other surfaces.
+NightslayerRatingSettings.whispers = false
+events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Othername-Nightslayer")
+assert(#messages == 5)
+NightslayerRatingSettings.whispers = true
+NightslayerRatingSettings.units = false
+wipe(lines)
+GameTooltip.NightslayerRatingToken = nil
+hooks.OnTooltipSetUnit(GameTooltip)
+assert(#lines == 0)
+NightslayerRatingSettings.units = true
+NightslayerRatingSettings.bracket3 = false
+NightslayerRatingSettings.bracket5 = false
+IsShiftKeyDown = function() return true end
+hooks.OnTooltipSetUnit(GameTooltip)
+tooltip = table.concat(lines, "\n")
+assert(tooltip:find("2v2", 1, true) and not tooltip:find("3v3", 1, true))
+assert(tooltip:find("100 below Rank One cutoff", 1, true))
+NightslayerRatingSettings.nextCutoff = false
+wipe(lines)
+GameTooltip.NightslayerRatingToken = nil
+hooks.OnTooltipSetUnit(GameTooltip)
+assert(not table.concat(lines, "\n"):find("below Rank One", 1, true))
 print("Rating color boundaries, season isolation, tooltip and whisper tests passed")

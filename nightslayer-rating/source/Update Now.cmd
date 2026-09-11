@@ -13,7 +13,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%UPDATER%"
 set "UPDATE_EXIT=%ERRORLEVEL%"
 echo.
 if "%UPDATE_EXIT%"=="0" (
-  echo Rating cache updated. Restart WoW or type /reload to load it now.
+  echo Update attempt finished. Type /reload, then /nsr status to see the result and data age.
 ) else (
   echo Update failed. See %%LOCALAPPDATA%%\NightslayerRating\updater.log
 )

@@ -46,6 +46,20 @@ function Colors.Text(band, text)
     return "|cff" .. band.hex .. tostring(text) .. "|r"
 end
 
+function Colors.NextCutoff(data, value, bracket)
+    local rating = tonumber(value) or 0
+    if rating <= 0 then return nil end
+    local entry = Colors.GetCutoffs(data, data.meta and data.meta.season, bracket)
+    if not entry then return nil end
+    local stale = time() - entry.updated > 48 * 3600 and " (stale cutoff)" or ""
+    for index = #entry.thresholds, 1, -1 do
+        if rating < entry.thresholds[index] then
+            return (entry.thresholds[index] - rating) .. " below " .. BANDS[index].cutoff .. " cutoff" .. stale
+        end
+    end
+    return "At or above Rank One cutoff" .. stale
+end
+
 function Colors.Status(data)
     local season = data.meta and data.meta.season or 0
     local oldest, missing = nil, {}
