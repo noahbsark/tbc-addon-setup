@@ -25,7 +25,7 @@ $ProfileErrorDelayMilliseconds = 3000
 $ProfileRefreshSeconds = 604800
 $ActiveProfileRefreshSeconds = 86400
 $ActivePlayerSeconds = 3 * 86400
-$UpdaterVersion = '1.4.2'
+$UpdaterVersion = '1.5.0'
 $RequestRetentionSeconds = 2592000
 $ExactCacheRetentionSeconds = 7776000
 $PriorityOffset = 2000000000
@@ -178,6 +178,75 @@ function Convert-SharedRatingMap {
     return $map
 }
 
+function Convert-SharedProfile {
+    param($Object)
+    $result = @{ exactBest = @{}; exactFetchedAt = 0 }
+    $stamp = [int64]((Get-ObjectProperty $Object 'exactFetchedAt') -as [int64])
+    $raw = Get-ObjectProperty $Object 'exactBest'
+    if ($stamp -le 0 -or $stamp -gt ((Get-UnixTime) + 3600) -or $null -eq $raw -or
+        ($raw -isnot [Collections.IDictionary] -and $raw -isnot [pscustomobject])) { return $result }
+    foreach ($bracket in @('2', '3', '5')) {
+        $value = Get-ObjectProperty $raw $bracket
+        if ($null -eq $value) { continue }
+        $rating = 0
+        if (-not [int]::TryParse([string]$value, [ref]$rating) -or $rating -lt 0 -or $rating -gt 10000) { return $result }
+    }
+    $result.exactBest = Convert-SharedRatingMap $raw
+    $result.exactFetchedAt = $stamp
+    return $result
+}
+
+function Merge-SharedPeaks {
+    param([hashtable]$Row, $Previous)
+    $new = Convert-SharedProfile $Row
+    $old = Convert-SharedProfile $Previous
+    foreach ($bracket in @('2', '3', '5')) {
+        $value = [Math]::Max((Get-CachedRating $new.exactBest ([int]$bracket)), (Get-CachedRating $old.exactBest ([int]$bracket)))
+        if ($value -gt 0) { $new.exactBest[$bracket] = $value }
+    }
+    $Row.exactBest = $new.exactBest
+    $Row.exactFetchedAt = [Math]::Max($new.exactFetchedAt, $old.exactFetchedAt)
+}
+
+function Sync-PlayerPeaksFromShared {
+    param([hashtable]$Player, [hashtable]$SharedPlayers)
+    $hash = Get-LookupHash -Name $Player.name -Realm $Player.realm
+    $profile = Convert-SharedProfile (Get-ObjectProperty $SharedPlayers $hash)
+    if ($profile.exactFetchedAt -le 0) { return }
+    foreach ($bracket in @('2', '3', '5')) {
+        $value = [Math]::Max((Get-CachedRating $profile.exactBest ([int]$bracket)), (Get-CachedRating $Player.exactBest ([int]$bracket)))
+        if ($value -gt 0) { $Player.exactBest[$bracket] = $value }
+    }
+    if ($profile.exactFetchedAt -gt $Player.exactFetchedAt) {
+        $Player.exactFetchedAt = $profile.exactFetchedAt
+        $Player.exactSource = 'shared'
+        if ($profile.exactFetchedAt -gt $Player.profileAttemptAt) { $Player.notFoundUntil = 0 }
+    }
+}
+
+function Test-CurrentRatingAvailable {
+    param([hashtable]$Player)
+    foreach ($bracket in @('2', '3', '5')) {
+        if ((Get-CachedRating $Player.current ([int]$bracket)) -gt 0 -and
+            (Get-CachedRating $Player.currentLastKnown ([int]$bracket)) -eq 0 -and
+            [int64]((Get-ObjectProperty $Player.currentUpdated $bracket) -as [int64]) -gt ((Get-UnixTime) - 48 * 3600)) { return $true }
+    }
+    return $false
+}
+
+function Update-QueueCoverage {
+    param([hashtable]$Cache, $Requests)
+    $Cache.status.queuedPlayers = @($Requests).Count
+    foreach ($field in @('currentCachedProfiles', 'missingCurrentProfiles', 'cachedPeakProfiles', 'sharedPeakHits')) { $Cache.status[$field] = 0 }
+    foreach ($request in $Requests) {
+        $player = Get-PlayerRecord $Cache $request.Name $request.Realm
+        if ($player.current.Count -gt 0) { $Cache.status.currentCachedProfiles++ }
+        if (-not (Test-CurrentRatingAvailable $player)) { $Cache.status.missingCurrentProfiles++ }
+        if ($player.exactFetchedAt -gt 0) { $Cache.status.cachedPeakProfiles++ }
+        if ($player.exactSource -eq 'shared') { $Cache.status.sharedPeakHits++ }
+    }
+}
+
 function Convert-UpdateTimes {
     param($Object)
     $map = @{}
@@ -275,6 +344,7 @@ function New-Cache {
         leaderboardUpdates = @{}
         status = @{ mode = 'bundled'; lastAttempt = 0; lastSuccess = 0; pendingProfiles = 0
             failedProfiles = 0; unavailableProfiles = 0; lastVersionCheck = 0; availableVersion = ''
+            queuedPlayers = 0; currentCachedProfiles = 0; missingCurrentProfiles = 0; cachedPeakProfiles = 0; sharedPeakHits = 0
             queueState = ''; queueTotal = 0; queueAttempted = 0; queueFetched = 0; queueMissing = 0; queueFailed = 0 }
         sharedGenerated = 0
         sharedCounts = @{ Nightslayer = 0; Dreamscythe = 0 }
@@ -403,7 +473,8 @@ function Read-Cache {
         $cache.leaderboardUpdates = Convert-UpdateTimes (Get-ObjectProperty $raw 'leaderboardUpdates')
         $savedStatus = Get-ObjectProperty $raw 'status'
         foreach ($key in @('lastAttempt', 'lastSuccess', 'lastVersionCheck', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles',
-            'queueTotal', 'queueAttempted', 'queueFetched', 'queueMissing', 'queueFailed')) {
+            'queueTotal', 'queueAttempted', 'queueFetched', 'queueMissing', 'queueFailed',
+            'queuedPlayers', 'currentCachedProfiles', 'missingCurrentProfiles', 'cachedPeakProfiles', 'sharedPeakHits')) {
             $cache.status[$key] = [Math]::Max(0, [int64]((Get-ObjectProperty $savedStatus $key) -as [int64]))
         }
         foreach ($key in @('mode', 'availableVersion', 'queueState')) {
@@ -455,6 +526,9 @@ function Read-Cache {
                 $record.bestSeen = Convert-RatingMap (Get-ObjectProperty $value 'bestSeen')
                 $record.exactBest = Convert-RatingMap (Get-ObjectProperty $value 'exactBest')
                 $record.exactFetchedAt = [int64]((Get-ObjectProperty $value 'exactFetchedAt') -as [int64])
+                $record.exactSource = $(if ((Get-ObjectProperty $value 'exactSource') -eq 'shared') { 'shared' } else { 'local' })
+                $record.localProfileFetchedAt = [int64]((Get-ObjectProperty $value 'localProfileFetchedAt') -as [int64])
+                if ($record.exactSource -ne 'shared' -and $record.localProfileFetchedAt -le 0) { $record.localProfileFetchedAt = $record.exactFetchedAt }
                 $record.profileAttemptAt = [int64]((Get-ObjectProperty $value 'profileAttemptAt') -as [int64])
                 $record.lastSeen = [int64]((Get-ObjectProperty $value 'lastSeen') -as [int64])
                 $record.notFoundUntil = [int64]((Get-ObjectProperty $value 'notFoundUntil') -as [int64])
@@ -475,6 +549,7 @@ function Read-Cache {
                         bestSeen = Convert-RatingMap (Get-ObjectProperty $value 'bestSeen')
                         previous = Convert-SharedRatingMap (Get-ObjectProperty $value 'previous')
                     }
+                    Merge-SharedPeaks $cache.sharedPlayers[$hash] $value
                 }
             }
 
@@ -586,6 +661,8 @@ function Get-PlayerRecord {
             bestSeen = @{}
             exactBest = @{}
             exactFetchedAt = 0
+            localProfileFetchedAt = 0
+            exactSource = 'local'
             profileAttemptAt = 0
             lastSeen = 0
             notFoundUntil = 0
@@ -819,10 +896,13 @@ function Import-SharedSnapshot {
             $old = Get-ObjectProperty $Cache.sharedPlayers $hash
             $previous = Convert-SharedRatingMap (Get-ObjectProperty $old 'previous')
         }
-        if ($current.Count -eq 0 -and $bestSeen.Count -eq 0 -and $previous.Count -eq 0) {
+        $peak = Convert-SharedProfile $value
+        if ($current.Count -eq 0 -and $bestSeen.Count -eq 0 -and $previous.Count -eq 0 -and $peak.exactFetchedAt -le 0) {
             continue
         }
         $newSharedPlayers[$hash] = @{ current = $current; bestSeen = $bestSeen; previous = $previous }
+        Merge-SharedPeaks $newSharedPlayers[$hash] $value
+        Merge-SharedPeaks $newSharedPlayers[$hash] (Get-ObjectProperty $Cache.sharedPlayers $hash)
         $merged++
     }
 
@@ -859,6 +939,7 @@ function Import-SharedSnapshot {
     $updates = Convert-UpdateTimes (Get-ObjectProperty $snapshot 'leaderboardUpdates')
     foreach ($player in @($Cache.players.Values)) {
         Sync-PlayerCurrentFromShared $player $newSharedPlayers $updates
+        Sync-PlayerPeaksFromShared $player $newSharedPlayers
         if (-not $legacy) { $player.previous = @{} }
         $hash = Get-LookupHash -Name ([string]$player.name) -Realm ([string]$player.realm)
         if ($null -eq $hash -or -not $newSharedPlayers.ContainsKey($hash)) {
@@ -1188,7 +1269,8 @@ function Sync-PlayerProfile {
         return 'missing'
     }
     $bracketBest = Get-ObjectProperty $profile 'bracket_best'
-    if ($null -eq $bracketBest) {
+    $validated = Convert-SharedProfile @{ exactFetchedAt = Get-UnixTime; exactBest = $bracketBest }
+    if ($validated.exactFetchedAt -le 0) {
         Write-Log ('Invalid profile response for {0}-{1}; preserving cached data.' -f $Request.Name, $Request.Realm)
         return 'error'
     }
@@ -1199,7 +1281,7 @@ function Sync-PlayerProfile {
         $bestValue = Get-ObjectProperty $bracketBest ([string]$bracket)
         $best = 0
         if ([int]::TryParse([string]$bestValue, [ref]$best) -and $best -ge 1 -and $best -le 10000) {
-            $player.exactBest[[string]$bracket] = $best
+            $player.exactBest[[string]$bracket] = [Math]::Max($best, (Get-CachedRating $player.exactBest $bracket))
             $player.bestSeen[[string]$bracket] = [Math]::Max($best, (Get-CachedRating $player.bestSeen $bracket))
         }
     }
@@ -1216,6 +1298,8 @@ function Sync-PlayerProfile {
         }
     }
     $player.exactFetchedAt = Get-UnixTime
+    $player.localProfileFetchedAt = $player.exactFetchedAt
+    $player.exactSource = 'local'
     $player.notFoundUntil = 0
     Write-Log ('Fetched exact lifetime highs for ' + $player.name + '-' + $player.realm)
     return 'fetched'
@@ -1242,6 +1326,7 @@ function Sync-QueuedProfiles {
         $player = Get-PlayerRecord -Cache $Cache -Name $request.Name -Realm $request.Realm
         $player.tracking = $true
         Sync-PlayerCurrentFromShared $player $Cache.sharedPlayers $Cache.leaderboardUpdates
+        Sync-PlayerPeaksFromShared $player $Cache.sharedPlayers
         $requestKey = (Normalize-Realm $request.Realm) + '|' + $request.Name.ToLowerInvariant()
         $queuedKeys[$requestKey] = $true
         $player.lastSeen = [Math]::Max([int64]$player.lastSeen, [int64]$request.Stamp)
@@ -1252,7 +1337,10 @@ function Sync-QueuedProfiles {
             continue
         }
         $interval = Get-ProfileRefreshInterval -Request $request -Now $now
-        if ($lastExact -le 0 -or ($now - $lastExact) -ge $interval) {
+        # A shared peak does not tell us an off-ladder player's current rating.
+        $currentLookupDue = -not (Test-CurrentRatingAvailable $player) -and $player.exactSource -eq 'shared' -and
+            ($player.localProfileFetchedAt -le 0 -or ($now - $player.localProfileFetchedAt) -ge $interval)
+        if ($lastExact -le 0 -or ($now - $lastExact) -ge $interval -or $currentLookupDue) {
             $candidates += $request
         }
     }
@@ -1260,11 +1348,13 @@ function Sync-QueuedProfiles {
     Write-Log ('Exact profiles: {0} due now, {1} already cached or temporarily unavailable.' -f `
         $candidates.Count, ($requests.Count - $candidates.Count))
 
-    # Missing peaks go first, then the longest-overdue refresh. A persistent
-    # failing profile cannot monopolize the front of the 50-request batch.
+    Update-QueueCoverage $Cache $requests
+    # Untried requests go before retries, then players without current data.
+    # Attempt dates rotate persistent failures behind other due requests.
     $candidates = @($candidates | Sort-Object -Property `
-        @{ Expression = { (Get-PlayerRecord $Cache $_.Name $_.Realm).exactFetchedAt -gt 0 } }, `
-        @{ Expression = { [int64]((Get-ObjectProperty (Get-PlayerRecord $Cache $_.Name $_.Realm) 'profileAttemptAt') -as [int64]) } })
+        @{ Expression = { [int64]((Get-ObjectProperty (Get-PlayerRecord $Cache $_.Name $_.Realm) 'profileAttemptAt') -as [int64]) } }, `
+        @{ Expression = { Test-CurrentRatingAvailable (Get-PlayerRecord $Cache $_.Name $_.Realm) } }, `
+        @{ Expression = { (Get-PlayerRecord $Cache $_.Name $_.Realm).exactFetchedAt -gt 0 } })
     $processed = 0
     $missing = 0
     $transientErrors = 0
@@ -1317,6 +1407,7 @@ function Sync-QueuedProfiles {
             Start-Sleep -Milliseconds $ProfileErrorDelayMilliseconds
         }
         if ($DrainQueue -and ($attempted % $ProfileLimitPerRun) -eq 0 -and $attempted -lt $batch.Count) {
+            Update-QueueCoverage $Cache $requests
             Save-QueueCheckpoint $Cache $AddonDirectory
             # Short waits keep Q responsive during the inter-batch pause.
             for ($second = 0; $second -lt 5; $second++) {
@@ -1330,6 +1421,7 @@ function Sync-QueuedProfiles {
     $Cache.status.pendingProfiles = [Math]::Max(0, $candidates.Count - $processed - $missing)
     $Cache.status.failedProfiles = $transientErrors
     $Cache.status.unavailableProfiles = $unavailableBefore + $missing
+    Update-QueueCoverage $Cache $requests
     if ($DrainQueue) {
         if ($Cache.status.queueState -eq 'running') { $Cache.status.queueState = 'complete' }
         Save-QueueCheckpoint $Cache $AddonDirectory
@@ -1414,6 +1506,11 @@ function Format-LuaSharedPlayer {
             $ratings += Get-CachedRating -Map $map -Bracket $bracket
         }
     }
+    $profile = Convert-SharedProfile $Player
+    if ($profile.exactFetchedAt -gt 0) {
+        $ratings += 'exactBest = ' + (Format-LuaRatingMap $profile.exactBest)
+        $ratings += 'exactFetchedAt = ' + [string]$profile.exactFetchedAt
+    }
     return '{ ' + ($ratings -join ', ') + ' }'
 }
 
@@ -1438,6 +1535,8 @@ function Write-LuaData {
     [void]$builder.AppendLine(('        leaderboardUpdates = {0},' -f (Format-LuaRatingMap $Cache.leaderboardUpdates)))
     [void]$builder.AppendLine(('        sharedGenerated = {0},' -f [int64]$Cache.sharedGenerated))
     [void]$builder.AppendLine('        profileLookup = true,')
+    $sharedProfiles = @($Cache.sharedPlayers.Values | Where-Object { [int64]((Get-ObjectProperty $_ 'exactFetchedAt') -as [int64]) -gt 0 }).Count
+    [void]$builder.AppendLine(('        sharedProfiles = {0},' -f $sharedProfiles))
     [void]$builder.AppendLine('        counts = {')
     [void]$builder.AppendLine(('            Nightslayer = {0},' -f [int]$Cache.sharedCounts.Nightslayer))
     [void]$builder.AppendLine(('            Dreamscythe = {0},' -f [int]$Cache.sharedCounts.Dreamscythe))
@@ -1518,6 +1617,7 @@ function Write-LuaData {
         [void]$builder.AppendLine(('            exact = {0},' -f $(if ($isExact) { 'true' } else { 'false' })))
         [void]$builder.AppendLine(('            exactBrackets = {{ {0} }},' -f ($exactBrackets -join ', ')))
         [void]$builder.AppendLine(('            exactFetchedAt = {0},' -f [int64]$player.exactFetchedAt))
+        [void]$builder.AppendLine(('            exactSource = "{0}",' -f $(if ($player.exactSource -eq 'shared') { 'shared' } else { 'local' })))
         [void]$builder.AppendLine('        },')
     }
 
@@ -1546,7 +1646,8 @@ function Write-SyncStatus {
     $lines = @('-- Download status; read by WoW at login/reload.', 'NightslayerRatingSyncStatus = {')
     $lines += ('    installedVersion = "{0}",' -f $UpdaterVersion)
     foreach ($key in @('lastAttempt', 'lastSuccess', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles',
-        'queueTotal', 'queueAttempted', 'queueFetched', 'queueMissing', 'queueFailed')) {
+        'queueTotal', 'queueAttempted', 'queueFetched', 'queueMissing', 'queueFailed',
+        'queuedPlayers', 'currentCachedProfiles', 'missingCurrentProfiles', 'cachedPeakProfiles', 'sharedPeakHits')) {
         $lines += ('    {0} = {1},' -f $key, [Math]::Max(0, [int64]$Cache.status[$key]))
     }
     $mode = [string]$Cache.status.mode

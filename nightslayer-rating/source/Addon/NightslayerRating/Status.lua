@@ -32,9 +32,17 @@ function UI.StatusLines(data, details, record)
         lines[#lines + 1] = "Last attempt: " .. UI.Age(sync.lastAttempt)
         lines[#lines + 1] = "Last complete rating download: " .. UI.Age(sync.lastSuccess)
         if record and record.exact then lines[#lines + 1] = "Peak checked: " .. UI.Age(record.exactFetchedAt) end
-        if sync.pendingProfiles then lines[#lines + 1] = "Peak lookups pending: " .. sync.pendingProfiles end
+        if meta.sharedProfiles then lines[#lines + 1] = "Shared peak profiles available: " .. meta.sharedProfiles end
+        if sync.queuedPlayers then
+            lines[#lines + 1] = string.format("Tracked requests: %d; current ratings cached: %d (includes last known)",
+                sync.queuedPlayers, tonumber(sync.currentCachedProfiles) or 0)
+            lines[#lines + 1] = "Without confirmed current ratings: " .. (tonumber(sync.missingCurrentProfiles) or 0)
+            lines[#lines + 1] = string.format("Peak profiles cached: %d; supplied by shared cache: %d",
+                tonumber(sync.cachedPeakProfiles) or 0, tonumber(sync.sharedPeakHits) or 0)
+        end
+        if sync.pendingProfiles then lines[#lines + 1] = "Profile lookups due (current or peak): " .. sync.pendingProfiles end
         if sync.failedProfiles and sync.failedProfiles > 0 then
-            lines[#lines + 1] = "Peak lookups retrying: " .. sync.failedProfiles
+            lines[#lines + 1] = "Profile lookups retrying: " .. sync.failedProfiles
         end
         if sync.unavailableProfiles and sync.unavailableProfiles > 0 then
             lines[#lines + 1] = "Profiles unavailable: " .. sync.unavailableProfiles

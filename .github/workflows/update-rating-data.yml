@@ -31,8 +31,14 @@ jobs:
         run: python -m unittest central-rating-data/test_build_shared_cache.py
 
       - name: Build shared snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          gh release download ratings-data --repo "$GITHUB_REPOSITORY" \
+            --pattern shared-cache.json.gz --dir "$RUNNER_TEMP/nsr-previous"
           python central-rating-data/build_shared_cache.py \
+            --previous-snapshot "$RUNNER_TEMP/nsr-previous/shared-cache.json.gz" \
+            --profile-limit 100 --profile-seconds 480 \
             --output shared-cache.json.gz \
             --meta-output shared-cache.meta.json \
             --lua-output shared-data.lua.gz

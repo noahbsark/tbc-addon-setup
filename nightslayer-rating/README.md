@@ -4,7 +4,17 @@ Free World of Warcraft TBC Anniversary addon for Nightslayer and Dreamscythe US.
 
 [Download and install](https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/) · [Report a bug](https://github.com/noahbsark/tbc-addon-setup/issues) · [Shared data status](https://github.com/noahbsark/tbc-addon-setup/releases/tag/ratings-data)
 
-## New in 1.4.2
+## New in 1.5.0
+
+- **Shared exact peaks:** the hourly GitHub collector attempts up to 100 public leaderboard profiles, with at least one second between requests and an eight-minute collection budget. Successful peak results are preserved in the next shared snapshot and reused by installed companions. Coverage grows gradually; it does not immediately resolve every local queue. Profiles become eligible for another shared check after seven days, subject to the batch budget. Recently checked players who leave all published ladders retain their peaks for up to 90 days without an invented current rating.
+- **Clearer coverage:** player search separates cached current-season ratings from the peak-profile lookup. `/nsr status` shows current ratings cached, requests without confirmed current data, peak profiles cached, shared profiles reused, and remaining profile lookups. These counts describe the saved request list; a due profile can already have current ratings or an older peak.
+- **Missing current ratings first:** among untried requests, players without confirmed current ratings get priority. Attempt dates rotate failures behind other due requests. A shared peak does not suppress a needed off-ladder current-rating lookup. Fresh shared peaks skip duplicate local requests for players with current data; daily/weekly local freshness rules still apply.
+
+The collector derives candidates from public Nightslayer/Dreamscythe leaderboard names. It does not receive local queues, title observations, or cache uploads. It stores only realm-aware hashes, ratings, realm, and collection dates. HTTP 429 stops profile collection immediately; five consecutive errors pause it. A 404 is retried after seven days and other failures after six hours. Failed profiles keep their previous peaks, and the previous shared snapshot must load successfully before the production collector can publish another one.
+
+Close WoW and run **Upgrade.cmd** to install a published release, or extract the new Windows bundle and run **Install.cmd**. Run **Process Queue** afterward for profiles still due, then log in or `/reload` to load results. Shared coverage appears as the collector completes batches.
+
+### Included 1.4.2 upgrades
 
 **Process the entire queue:** type `/reload` in WoW to save queued names, then open **Windows Start menu → Nightslayer Rating → Process Queue**, or run `Process Queue.cmd` from the extracted Windows bundle after installation. It takes one pass through all profiles currently due, saves cache/data/status every 50 attempts, and shows progress. Press **Q** to save and stop after the current request; running it again skips recently completed profiles. You can leave WoW open; `/reload` again afterward and use `/nsr status` to see results. `/nsr queue` shows these instructions in game.
 
@@ -54,7 +64,7 @@ Thresholds are inclusive. Current S3 ratings use the live [2v2](https://ironforg
 
 On a future season rollover, Current follows the snapshot season. Peak/Observed keeps the same fixed S2 color comparison. Colors describe a rating range and do not claim an earned title.
 
-To install or test 1.4.2, close WoW, extract the **1.4.2 Windows bundle**, and run `Install.cmd`. This preserves your profile cache, queue and settings and installs the Process Queue shortcut. Once 1.4.2 is merged and published, users with 1.4.0/1.4.1 can instead use `Upgrade.cmd`. Data and cutoff changes use the existing updater; log in or `/reload` to see them. The addon-only ZIP is a point-in-time snapshot and does not refresh itself.
+To install or test 1.5.0, close WoW, extract the **1.5.0 Windows bundle**, and run `Install.cmd`. This preserves your profile cache, queue and settings. Once 1.5.0 is merged and published, existing users can instead use `Upgrade.cmd`. Data and cutoff changes use the existing updater; log in or `/reload` to see them. The addon-only ZIP is a point-in-time snapshot and does not refresh itself.
 
 Version 1.3.1 accepts the existing v4/v5 shared snapshots as well as v6. The Windows bundle includes the same snapshot in a format the companion can load locally, so a fresh install works during a source outage. Failed or empty leaderboard requests preserve their cached bracket values, and a failed future-season probe cannot advance the season. An update with no usable data leaves the existing Data.lua untouched.
 
@@ -62,7 +72,7 @@ The addon-only ZIP contains a point-in-time shared snapshot. The Windows bundle 
 
 ## Data and privacy
 
-The shared GitHub snapshot contains ratings keyed by deterministic realm-aware lookup hashes, not raw names. These keys are pseudonymous, not encryption. Exact names encountered in game remain in the addon's SavedVariables queue and in the local companion cache; recent requests expire after 30 days and unused exact cache rows after 90 days.
+The shared GitHub snapshot contains ratings keyed by deterministic realm-aware lookup hashes, not raw names. These keys are pseudonymous, not encryption. Public leaderboard profile peaks are collected centrally and shared under the same hashes. Exact names encountered in game remain in the addon's SavedVariables queue and in the local companion cache; recent requests expire after 30 days and unused exact cache rows after 90 days.
 
 Installed companions are read-only GitHub clients and receive no repository credential. They do not upload user-submitted data, chat text, account details, machine identifiers, or credentials. See [`source/README.txt`](source/README.txt) for the full design and uninstall details.
 

@@ -41,13 +41,24 @@ function UI.HistoryLine(record, bracket)
 end
 
 function UI.ProfileStatus(record, automatic)
-    if not automatic then return "Exact profiles require the Windows companion." end
+    local cached = {}
+    for index, bracket in ipairs({2, 3, 5}) do
+        local rating = record and (bracketValue(record.current, bracket) or record[index])
+        if (tonumber(rating) or 0) > 0 then cached[#cached + 1] = bracket .. "v" .. bracket end
+    end
+    local prefix = #cached > 0 and ("Current-season ratings cached: " .. table.concat(cached, ", ") .. ".\n") or
+        "Current-season ratings: no cached data.\n"
     if record and (tonumber(record.notFoundUntil) or 0) > time() then
-        return "Profile unavailable; retry after " .. date("%Y-%m-%d", record.notFoundUntil) .. "."
+        return prefix .. "Profile unavailable; retry after " .. date("%Y-%m-%d", record.notFoundUntil) .. "."
     end
     if record and (tonumber(record.profileAttemptAt) or 0) > (tonumber(record.exactFetchedAt) or 0) then
-        return "Profile lookup will retry; cached ratings remain available."
+        return prefix .. "Profile lookup will retry; cached ratings remain available."
     end
-    if record and record.exact then return "Profile cached; active players are checked about daily." end
-    return "Exact profile lookup queued."
+    if record and record.exact then
+        local source = record.exactSource == "shared" and "shared cache" or "local lookup"
+        return prefix .. "Peak profile cached from " .. source .. "; checked " .. UI.Age(record.exactFetchedAt) .. "."
+    end
+    if not automatic then return prefix .. "Exact profiles require the Windows companion." end
+    return prefix .. (#cached > 0 and "Exact peak lookup pending; current ratings are already cached." or
+        "Current rating and exact peak lookup pending.")
 end

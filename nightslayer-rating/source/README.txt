@@ -1,4 +1,21 @@
-NIGHTSLAYER RATING 1.4.2
+NIGHTSLAYER RATING 1.5.0
+
+WHAT CHANGED IN 1.5.0
+- The hourly shared collector gradually adds exact lifetime peaks from public
+  leaderboard profiles: at most 100 attempts/run, at least one second/request,
+  and an eight-minute profile budget. Coverage grows over time. Fresh shared
+  results can skip duplicate local peak lookups.
+- Shared profiles become eligible after seven days, subject to the batch budget.
+  HTTP 429 stops collection; five consecutive failures pause it. Previous peaks
+  survive errors. Profiles missing from every ladder retain peaks for up to
+  90 days without showing an old current rating as fresh.
+- Player search separates current-rating coverage from peak lookup status.
+  /nsr status reports cached current ratings, profiles missing confirmed current
+  data, cached peak profiles, shared reuse and remaining profile requests.
+- Untried players missing current ratings receive priority, while attempt dates
+  rotate retries. Shared peaks do not suppress needed off-ladder current lookups.
+- The central collector uses public leaderboards. Your local queue, exact names,
+  title observations and cache are never uploaded.
 
 WHAT CHANGED IN 1.4.2
 - Process Queue.cmd (also in Windows Start menu > Nightslayer Rating) processes
@@ -232,7 +249,8 @@ WHY CLIENTS DO NOT WRITE TO GITHUB
 Installed companions are read-only GitHub clients. Giving them a shared write
 credential would let anyone extract it, falsify ratings, or damage the database.
 The central job independently verifies bulk data, while exact character requests
-remain private and automatic on each user's computer.
+remain local and automatic on each user's computer. Separately, the shared
+collector looks up public leaderboard profiles and publishes hashed peak results.
 
 PRIVACY AND SAFETY
 ------------------

@@ -74,6 +74,18 @@ player.notFoundUntil = nil
 player.profileAttemptAt = time()
 assert(UI.ProfileStatus(player, true):find("will retry", 1, true))
 assert(UI.ProfileStatus(nil, false):find("Windows companion", 1, true))
+-- Shared exact peaks use frozen S2 colors, with observed highs kept honest.
+NightslayerRatingData.sharedPlayers["ec31af45054a44db"] = {
+    2100, 2300, 0, 2200, 2400, 0, 2000, 1900, 0,
+    exactBest = { [2] = 2900, [3] = 2200 }, exactFetchedAt = time() - 600 }
+local shared = table.concat(UI.FindPlayer("Reefey-Nightslayer"), "\n")
+assert(shared:find("Current-season ratings cached: 2v2, 3v3", 1, true))
+assert(shared:find("Peak profile cached from shared cache", 1, true))
+assert(shared:find("Peak |cffff80002900|r", 1, true))
+assert(shared:find("Observed", 1, true))
+NightslayerRatingData.meta.profileLookup = false
+assert(not UI.ProfileStatus(NightslayerRatingData.sharedPlayers["ec31af45054a44db"], false):find("require", 1, true))
+NightslayerRatingData.meta.profileLookup = true
 SlashCmdList.NIGHTSLAYERRATING("search Example-Nightslayer")
 assert(frames.NightslayerRatingSearch.shown)
 assert(frames.NightslayerRatingSearch.input:GetText() == "Example-Nightslayer")

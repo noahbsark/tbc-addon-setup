@@ -25,7 +25,7 @@ local status = table.concat(UI.StatusLines(data, true, { exact = true, exactFetc
 assert(status:find("3d ago (stale)", 1, true)) -- never use the freshly generated timestamp
 assert(status:find("Download failed", 1, true))
 assert(status:find("Peak checked: 1d ago", 1, true))
-assert(status:find("pending: 14", 1, true))
+assert(status:find("Profile lookups due (current or peak): 14", 1, true))
 assert(status:find("999.0.0 available", 1, true))
 assert(UI.NewerVersion("1.10.0", "1.9.0"))
 assert(not UI.NewerVersion("1.4.0", "1.4.0"))
@@ -39,10 +39,20 @@ NightslayerRatingSyncStatus.queueFetched = 68
 NightslayerRatingSyncStatus.queueMissing = 1
 NightslayerRatingSyncStatus.queueFailed = 1
 NightslayerRatingSyncStatus.pendingProfiles = 781
+NightslayerRatingSyncStatus.queuedPlayers = 850
+NightslayerRatingSyncStatus.currentCachedProfiles = 800
+NightslayerRatingSyncStatus.missingCurrentProfiles = 60
+NightslayerRatingSyncStatus.cachedPeakProfiles = 69
+NightslayerRatingSyncStatus.sharedPeakHits = 30
+data.meta.sharedProfiles = 100
 local queueStatus = table.concat(UI.StatusLines(data, true), "\n")
 assert(queueStatus:find("70/850 attempted (stopped by user)", 1, true))
 assert(queueStatus:find("68 fetched, 1 unavailable, 1 need retry", 1, true))
 assert(queueStatus:find("Large queue: /nsr queue", 1, true))
+assert(queueStatus:find("current ratings cached: 800", 1, true))
+assert(queueStatus:find("Without confirmed current ratings: 60", 1, true))
+assert(queueStatus:find("Peak profiles cached: 69; supplied by shared cache: 30", 1, true))
+assert(queueStatus:find("Shared peak profiles available: 100", 1, true))
 
 -- Only real unit API observations or the player's owned-title list are accepted.
 local character, realm, guid, displayed = "Example", "Nightslayer", "Player-123-456", "Duelist Example"
