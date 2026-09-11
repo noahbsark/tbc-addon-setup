@@ -32,6 +32,17 @@ assert(not UI.NewerVersion("1.4.0", "1.4.0"))
 assert(not UI.NewerVersion("bad", "1.4.0"))
 data.meta.leaderboardUpdates = { [2] = time(), [3] = time() - 4 * 86400, [5] = time() }
 assert(UI.StatusLines(data, false)[1]:find("4d ago (stale)", 1, true))
+NightslayerRatingSyncStatus.queueState = "cancelled"
+NightslayerRatingSyncStatus.queueTotal = 850
+NightslayerRatingSyncStatus.queueAttempted = 70
+NightslayerRatingSyncStatus.queueFetched = 68
+NightslayerRatingSyncStatus.queueMissing = 1
+NightslayerRatingSyncStatus.queueFailed = 1
+NightslayerRatingSyncStatus.pendingProfiles = 781
+local queueStatus = table.concat(UI.StatusLines(data, true), "\n")
+assert(queueStatus:find("70/850 attempted (stopped by user)", 1, true))
+assert(queueStatus:find("68 fetched, 1 unavailable, 1 need retry", 1, true))
+assert(queueStatus:find("Large queue: /nsr queue", 1, true))
 
 -- Only real unit API observations or the player's owned-title list are accepted.
 local character, realm, guid, displayed = "Example", "Nightslayer", "Player-123-456", "Duelist Example"

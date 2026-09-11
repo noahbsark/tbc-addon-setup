@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$WowPath,
-    [switch]$Quiet
+    [switch]$Quiet,
+    [switch]$ProcessQueue
 )
 
 Set-StrictMode -Version 2.0
@@ -24,7 +25,7 @@ $ProfileErrorDelayMilliseconds = 3000
 $ProfileRefreshSeconds = 604800
 $ActiveProfileRefreshSeconds = 86400
 $ActivePlayerSeconds = 3 * 86400
-$UpdaterVersion = '1.4.1'
+$UpdaterVersion = '1.4.2'
 $RequestRetentionSeconds = 2592000
 $ExactCacheRetentionSeconds = 7776000
 $PriorityOffset = 2000000000
@@ -273,7 +274,8 @@ function New-Cache {
         lastLeaderboardUpdated = 0
         leaderboardUpdates = @{}
         status = @{ mode = 'bundled'; lastAttempt = 0; lastSuccess = 0; pendingProfiles = 0
-            failedProfiles = 0; unavailableProfiles = 0; lastVersionCheck = 0; availableVersion = '' }
+            failedProfiles = 0; unavailableProfiles = 0; lastVersionCheck = 0; availableVersion = ''
+            queueState = ''; queueTotal = 0; queueAttempted = 0; queueFetched = 0; queueMissing = 0; queueFailed = 0 }
         sharedGenerated = 0
         sharedCounts = @{ Nightslayer = 0; Dreamscythe = 0 }
         sharedPlayers = @{}
@@ -400,13 +402,15 @@ function Read-Cache {
         Merge-Cutoffs -Cache $cache -Object (Get-ObjectProperty $raw 'cutoffs')
         $cache.leaderboardUpdates = Convert-UpdateTimes (Get-ObjectProperty $raw 'leaderboardUpdates')
         $savedStatus = Get-ObjectProperty $raw 'status'
-        foreach ($key in @('lastAttempt', 'lastSuccess', 'lastVersionCheck', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles')) {
+        foreach ($key in @('lastAttempt', 'lastSuccess', 'lastVersionCheck', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles',
+            'queueTotal', 'queueAttempted', 'queueFetched', 'queueMissing', 'queueFailed')) {
             $cache.status[$key] = [Math]::Max(0, [int64]((Get-ObjectProperty $savedStatus $key) -as [int64]))
         }
-        foreach ($key in @('mode', 'availableVersion')) {
+        foreach ($key in @('mode', 'availableVersion', 'queueState')) {
             $value = [string](Get-ObjectProperty $savedStatus $key)
             if ($value.Length -le 32) { $cache.status[$key] = $value }
         }
+        if ($cache.status.queueState -eq 'running') { $cache.status.queueState = 'interrupted' }
 
         $lastUpdated = Get-ObjectProperty $raw 'lastLeaderboardUpdated'
         if ($null -ne $lastUpdated) {
@@ -609,7 +613,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.4.0 (local WoW addon updater; adaptive-rate cache)'
+                'User-Agent' = ('NightslayerRating/{0} (local WoW addon updater; adaptive-rate cache)' -f $UpdaterVersion)
             }
         } catch {
             $statusCode = $null
@@ -624,7 +628,7 @@ function Invoke-IronForgeJson {
             if ($AllowNotFound -and $statusCode -eq 404) {
                 return $null
             }
-            if ($AllowServerError -and $statusCode -ge 500 -and $statusCode -le 599) {
+            if ($AllowServerError -and ($statusCode -eq 429 -or ($statusCode -ge 500 -and $statusCode -le 599))) {
                 return [pscustomobject]@{
                     __nsrTransientError = $true
                     statusCode = $statusCode
@@ -1131,11 +1135,101 @@ function Get-QueuedRequests {
         @{ Expression = 'Stamp'; Descending = $true })
 }
 
+function Test-QueueCancellation {
+    # Q stops between requests. Redirected/noninteractive hosts have no keys.
+    try {
+        while ([Console]::KeyAvailable) {
+            if ([Console]::ReadKey($true).Key -eq [ConsoleKey]::Q) { return $true }
+        }
+    } catch { }
+    return $false
+}
+
+function Save-QueueCheckpoint {
+    param([hashtable]$Cache, [string]$AddonDirectory)
+    Save-Cache $Cache
+    # A failed bulk download must not prevent a newly fetched profile reaching
+    # WoW, or replace an installed dataset with an empty table.
+    $hasRatings = $Cache.sharedPlayers.Count -gt 0
+    foreach ($player in $Cache.players.Values) {
+        if ($player.current.Count -gt 0 -or $player.exactBest.Count -gt 0 -or $player.bestSeen.Count -gt 0) {
+            $hasRatings = $true
+            break
+        }
+    }
+    if ($hasRatings) { [void](Write-LuaData $Cache $AddonDirectory) }
+    Write-SyncStatus $Cache $AddonDirectory
+    Write-Log ('Queue saved: {0}/{1} attempted; {2} fetched, {3} unavailable, {4} need retry.' -f
+        $Cache.status.queueAttempted, $Cache.status.queueTotal, $Cache.status.queueFetched,
+        $Cache.status.queueMissing, $Cache.status.queueFailed)
+}
+
+function Sync-PlayerProfile {
+    param([hashtable]$Cache, $Request)
+    $player = Get-PlayerRecord $Cache $Request.Name $Request.Realm
+    $player.profileAttemptAt = Get-UnixTime
+    $encodedRealm = [Uri]::EscapeDataString([string]$Request.Realm)
+    $encodedName = [Uri]::EscapeDataString([string]$Request.Name)
+    try {
+        $profile = Invoke-IronForgeJson -Path ('anniversary/player/{0}/{1}' -f $encodedRealm, $encodedName) -AllowNotFound -AllowServerError
+    } catch {
+        Write-Log ('Skipped temporarily unavailable profile {0}-{1}: {2}' -f $Request.Name, $Request.Realm, $_.Exception.Message)
+        return 'error'
+    }
+    if ([bool](Get-ObjectProperty $profile '__nsrTransientError')) {
+        $statusCode = [int](Get-ObjectProperty $profile 'statusCode')
+        Write-Log ('Skipped temporarily unavailable profile {0}-{1}: HTTP {2}' -f $Request.Name, $Request.Realm, $statusCode)
+        if ($statusCode -eq 429) { return 'throttled' }
+        return 'error'
+    }
+    if ($null -eq $profile) {
+        $player.notFoundUntil = (Get-UnixTime) + 604800
+        Write-Log ('No IronForge profile found for ' + $Request.Name + '-' + $Request.Realm)
+        return 'missing'
+    }
+    $bracketBest = Get-ObjectProperty $profile 'bracket_best'
+    if ($null -eq $bracketBest) {
+        Write-Log ('Invalid profile response for {0}-{1}; preserving cached data.' -f $Request.Name, $Request.Realm)
+        return 'error'
+    }
+    $profileInfo = Get-ObjectProperty $profile 'info'
+    $canonicalName = [string](Get-ObjectProperty $profileInfo 'name')
+    if (-not [string]::IsNullOrWhiteSpace($canonicalName)) { $player.name = $canonicalName }
+    foreach ($bracket in @(2, 3, 5)) {
+        $bestValue = Get-ObjectProperty $bracketBest ([string]$bracket)
+        $best = 0
+        if ([int]::TryParse([string]$bestValue, [ref]$best) -and $best -ge 1 -and $best -le 10000) {
+            $player.exactBest[[string]$bracket] = $best
+            $player.bestSeen[[string]$bracket] = [Math]::Max($best, (Get-CachedRating $player.bestSeen $bracket))
+        }
+    }
+    $seasonData = Get-ObjectProperty $profile ('season' + [string]$Cache.currentSeason)
+    foreach ($bracket in @(2, 3, 5)) {
+        $bracketData = Get-ObjectProperty $seasonData ([string]$bracket)
+        $ratingValue = Get-ObjectProperty $bracketData 'rating'
+        $rating = 0
+        if ([int]::TryParse([string]$ratingValue, [ref]$rating) -and $rating -ge 1 -and $rating -le 10000) {
+            $stamp = Convert-SourceTime (Get-ObjectProperty $bracketData 'modified')
+            Set-CurrentRating $player $bracket $rating $stamp
+        } else {
+            Mark-CurrentRatingMissing $player $bracket (Get-UnixTime)
+        }
+    }
+    $player.exactFetchedAt = Get-UnixTime
+    $player.notFoundUntil = 0
+    Write-Log ('Fetched exact lifetime highs for ' + $player.name + '-' + $player.realm)
+    return 'fetched'
+}
+
 function Sync-QueuedProfiles {
     param(
         [hashtable]$Cache,
-        [string]$GamePath
+        [string]$GamePath,
+        [switch]$DrainQueue,
+        [string]$AddonDirectory
     )
+
+    if ($DrainQueue -and [string]::IsNullOrWhiteSpace($AddonDirectory)) { throw 'Queue processing needs an addon directory for checkpoints.' }
 
     $now = Get-UnixTime
     $candidates = @()
@@ -1174,89 +1268,76 @@ function Sync-QueuedProfiles {
     $processed = 0
     $missing = 0
     $transientErrors = 0
-    foreach ($request in @($candidates | Select-Object -First $ProfileLimitPerRun)) {
-        $player = Get-PlayerRecord -Cache $Cache -Name $request.Name -Realm $request.Realm
-        $player.profileAttemptAt = $now
-        $encodedRealm = [Uri]::EscapeDataString([string]$request.Realm)
-        $encodedName = [Uri]::EscapeDataString([string]$request.Name)
-        try {
-            $profile = Invoke-IronForgeJson -Path ('anniversary/player/{0}/{1}' -f $encodedRealm, $encodedName) -AllowNotFound -AllowServerError
-        } catch {
-            $transientErrors++
-            Write-Log ('Skipped temporarily unavailable profile {0}-{1}: {2}' -f
-                $request.Name, $request.Realm, $_.Exception.Message)
+    $attempted = 0
+    $consecutiveErrors = 0
+    $unavailableBefore = $Cache.status.unavailableProfiles
+    $batch = @($candidates | Select-Object -First $ProfileLimitPerRun)
+    if ($DrainQueue) {
+        # Snapshot the eligible queue once. New requests and failed attempts
+        # wait for a later run; neither can make this pass loop forever.
+        $batch = $candidates
+        $Cache.status.queueState = 'running'
+        $Cache.status.queueTotal = $candidates.Count
+        foreach ($key in @('queueAttempted', 'queueFetched', 'queueMissing', 'queueFailed')) { $Cache.status[$key] = 0 }
+        Write-Log ('Processing {0} due profiles. Press Q to save and stop between requests.' -f $batch.Count)
+    }
+    foreach ($request in $batch) {
+        if ($DrainQueue -and (Test-QueueCancellation)) {
+            $Cache.status.queueState = 'cancelled'
+            break
+        }
+        $outcome = Sync-PlayerProfile $Cache $request
+        $attempted++
+        switch ($outcome) {
+            'fetched' { $processed++; $consecutiveErrors = 0 }
+            'missing' { $missing++; $consecutiveErrors = 0 }
+            default { $transientErrors++; $consecutiveErrors++ }
+        }
+        $Cache.status.pendingProfiles = [Math]::Max(0, $candidates.Count - $processed - $missing)
+        $Cache.status.failedProfiles = $transientErrors
+        $Cache.status.unavailableProfiles = $unavailableBefore + $missing
+        if ($DrainQueue) {
+            $Cache.status.queueAttempted = $attempted
+            $Cache.status.queueFetched = $processed
+            $Cache.status.queueMissing = $missing
+            $Cache.status.queueFailed = $transientErrors
+            Write-Progress -Activity 'Nightslayer Rating: process entire queue' -PercentComplete ([int](100 * $attempted / $batch.Count)) -Status (
+                '{0}/{1} attempted; {2} fetched, {3} unavailable, {4} need retry. Q to stop.' -f $attempted, $batch.Count, $processed, $missing, $transientErrors)
+        }
+        if ($outcome -eq 'throttled' -or ($DrainQueue -and $consecutiveErrors -ge 5)) {
+            if ($DrainQueue) { $Cache.status.queueState = 'paused' }
+            Write-Log 'The profile source is throttling or repeatedly failing. Stopping requests; unfinished profiles remain queued for a later run.'
+            break
+        }
+        if ($outcome -in @('fetched', 'missing')) {
+            $delay = $ProfileSuccessDelayMilliseconds
+            if ($DrainQueue) { $delay = [Math]::Max(1000, $delay) }
+            Start-Sleep -Milliseconds $delay
+        } else {
             Start-Sleep -Milliseconds $ProfileErrorDelayMilliseconds
-            continue
         }
-        $player = Get-PlayerRecord -Cache $Cache -Name $request.Name -Realm $request.Realm
-
-        if ([bool](Get-ObjectProperty $profile '__nsrTransientError')) {
-            $transientErrors++
-            $statusCode = [int](Get-ObjectProperty $profile 'statusCode')
-            Write-Log ('Skipped temporarily unavailable profile {0}-{1}: HTTP {2}' -f
-                $request.Name, $request.Realm, $statusCode)
-            Start-Sleep -Milliseconds $ProfileErrorDelayMilliseconds
-            continue
-        }
-
-        if ($null -eq $profile) {
-            $player.notFoundUntil = $now + 604800
-            $missing++
-            Write-Log ('No IronForge profile found for ' + $request.Name + '-' + $request.Realm)
-            Start-Sleep -Milliseconds $ProfileSuccessDelayMilliseconds
-            continue
-        }
-
-        $profileInfo = Get-ObjectProperty $profile 'info'
-        $canonicalName = [string](Get-ObjectProperty $profileInfo 'name')
-        if (-not [string]::IsNullOrWhiteSpace($canonicalName)) {
-            $player.name = $canonicalName
-        }
-
-        $bracketBest = Get-ObjectProperty $profile 'bracket_best'
-        foreach ($bracket in @(2, 3, 5)) {
-            $bestValue = Get-ObjectProperty $bracketBest ([string]$bracket)
-            $best = 0
-            if ([int]::TryParse([string]$bestValue, [ref]$best) -and
-                $best -ge 1 -and $best -le 10000) {
-                $player.exactBest[[string]$bracket] = $best
-                $seen = 0
-                if ($player.bestSeen.ContainsKey([string]$bracket)) {
-                    $seen = [int]$player.bestSeen[[string]$bracket]
-                }
-                if ($best -gt $seen) {
-                    $player.bestSeen[[string]$bracket] = $best
-                }
+        if ($DrainQueue -and ($attempted % $ProfileLimitPerRun) -eq 0 -and $attempted -lt $batch.Count) {
+            Save-QueueCheckpoint $Cache $AddonDirectory
+            # Short waits keep Q responsive during the inter-batch pause.
+            for ($second = 0; $second -lt 5; $second++) {
+                if (Test-QueueCancellation) { $Cache.status.queueState = 'cancelled'; break }
+                Start-Sleep -Seconds 1
             }
+            if ($Cache.status.queueState -eq 'cancelled') { break }
         }
-
-        $seasonData = Get-ObjectProperty $profile ('season' + [string]$Cache.currentSeason)
-        foreach ($bracket in @(2, 3, 5)) {
-            $bracketData = Get-ObjectProperty $seasonData ([string]$bracket)
-            $ratingValue = Get-ObjectProperty $bracketData 'rating'
-            $rating = 0
-            if ([int]::TryParse([string]$ratingValue, [ref]$rating) -and
-                $rating -ge 1 -and $rating -le 10000) {
-                $stamp = Convert-SourceTime (Get-ObjectProperty $bracketData 'modified')
-                Set-CurrentRating $player $bracket $rating $stamp
-            } else {
-                # A missing bracket is not evidence of a zero rating.
-                Mark-CurrentRatingMissing $player $bracket $now
-            }
-        }
-
-        $player.exactFetchedAt = $now
-        $player.notFoundUntil = 0
-        $processed++
-        Write-Log ('Fetched exact lifetime highs for ' + $player.name + '-' + $player.realm)
-        Start-Sleep -Milliseconds $ProfileSuccessDelayMilliseconds
     }
 
-    Write-Log ('Exact-profile batch: fetched {0}, not found {1}, transient errors {2}.' -f
-        $processed, $missing, $transientErrors)
     $Cache.status.pendingProfiles = [Math]::Max(0, $candidates.Count - $processed - $missing)
     $Cache.status.failedProfiles = $transientErrors
-    $Cache.status.unavailableProfiles += $missing
+    $Cache.status.unavailableProfiles = $unavailableBefore + $missing
+    if ($DrainQueue) {
+        if ($Cache.status.queueState -eq 'running') { $Cache.status.queueState = 'complete' }
+        Save-QueueCheckpoint $Cache $AddonDirectory
+        Write-Progress -Activity 'Nightslayer Rating: process entire queue' -Completed
+        Write-Log ('Queue pass {0}: {1}/{2} attempted; {3} still pending. Unavailable profiles follow their normal retry schedule.' -f
+            $Cache.status.queueState, $attempted, $candidates.Count, $Cache.status.pendingProfiles)
+    }
+    Write-Log ('Exact-profile batch: fetched {0}, not found {1}, transient errors {2}.' -f $processed, $missing, $transientErrors)
 
     $exactCutoff = $now - $ExactCacheRetentionSeconds
     foreach ($key in @($Cache.players.Keys)) {
@@ -1464,12 +1545,16 @@ function Write-SyncStatus {
     param([hashtable]$Cache, [string]$AddonDirectory)
     $lines = @('-- Download status; read by WoW at login/reload.', 'NightslayerRatingSyncStatus = {')
     $lines += ('    installedVersion = "{0}",' -f $UpdaterVersion)
-    foreach ($key in @('lastAttempt', 'lastSuccess', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles')) {
+    foreach ($key in @('lastAttempt', 'lastSuccess', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles',
+        'queueTotal', 'queueAttempted', 'queueFetched', 'queueMissing', 'queueFailed')) {
         $lines += ('    {0} = {1},' -f $key, [Math]::Max(0, [int64]$Cache.status[$key]))
     }
     $mode = [string]$Cache.status.mode
     if ($mode -notin @('shared', 'direct', 'partial', 'cached', 'failed', 'bundled', 'retained')) { $mode = 'failed' }
     $lines += ('    mode = "{0}",' -f $mode)
+    if ($Cache.status.queueState -in @('running', 'complete', 'cancelled', 'paused', 'interrupted')) {
+        $lines += ('    queueState = "{0}",' -f $Cache.status.queueState)
+    }
     $version = [string]$Cache.status.availableVersion
     if ($version -match '^\d{1,3}\.\d{1,3}\.\d{1,3}$') { $lines += ('    availableVersion = "{0}",' -f $version) }
     $lines += '}'
@@ -1477,7 +1562,7 @@ function Write-SyncStatus {
 }
 
 function Update-RatingData {
-    param([hashtable]$Cache, [string]$GamePath, [string]$AddonDirectory)
+    param([hashtable]$Cache, [string]$GamePath, [string]$AddonDirectory, [switch]$DrainQueue)
     $Cache.status.lastAttempt = Get-UnixTime
     $Cache.status.mode = 'cached'
     try {
@@ -1498,7 +1583,11 @@ function Update-RatingData {
             }
         }
         Sync-RatingCutoffs -Cache $Cache
-        $profiles = Sync-QueuedProfiles -Cache $Cache -GamePath $GamePath
+        if ($DrainQueue) {
+            $profiles = Sync-QueuedProfiles -Cache $Cache -GamePath $GamePath -DrainQueue -AddonDirectory $AddonDirectory
+        } else {
+            $profiles = Sync-QueuedProfiles -Cache $Cache -GamePath $GamePath
+        }
         Sync-ReleaseVersion -Cache $Cache
         Save-Cache -Cache $Cache
         $hasRatings = $Cache.sharedPlayers.Count -gt 0
@@ -1551,7 +1640,7 @@ try {
     Write-Log 'Starting shared IronForge rating sync.'
 
     $cache = Read-Cache
-    Update-RatingData -Cache $cache -GamePath $WowPath -AddonDirectory $AddonPath
+    Update-RatingData -Cache $cache -GamePath $WowPath -AddonDirectory $AddonPath -DrainQueue:$ProcessQueue
 } catch {
     Write-Log ('ERROR: ' + $_.Exception.Message)
     if (-not $Quiet) {

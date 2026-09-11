@@ -79,6 +79,7 @@ try {
     Assert ((Get-Content (Join-Path $updaterTarget 'cache.json') -Raw) -eq 'existing exact peaks') 'Upgrade erased cache'
     Assert (@(Get-ChildItem $backupRoot -Directory).Count -eq 1) 'Upgrade backup missing'
     Assert (Test-Path (Join-Path $updaterTarget 'Upgrade.cmd')) 'Upgrade launcher not installed'
+    Assert (Test-Path (Join-Path $updaterTarget 'Process Queue.cmd')) 'Full queue launcher not installed'
     $before = Get-Content (Join-Path $addonTarget 'Core.lua') -Raw
     # Fail a copy only after backup and an earlier file replacement succeeded.
     function Copy-Item {

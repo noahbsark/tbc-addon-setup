@@ -39,6 +39,17 @@ function UI.StatusLines(data, details, record)
         if sync.unavailableProfiles and sync.unavailableProfiles > 0 then
             lines[#lines + 1] = "Profiles unavailable: " .. sync.unavailableProfiles
         end
+        local queueStates = { running = "in progress at last save", complete = "pass finished",
+            cancelled = "stopped by user", paused = "paused after source errors", interrupted = "interrupted" }
+        if queueStates[sync.queueState] then
+            lines[#lines + 1] = string.format("Last queue pass: %d/%d attempted (%s)",
+                tonumber(sync.queueAttempted) or 0, tonumber(sync.queueTotal) or 0, queueStates[sync.queueState])
+            lines[#lines + 1] = string.format("Queue results: %d fetched, %d unavailable, %d need retry",
+                tonumber(sync.queueFetched) or 0, tonumber(sync.queueMissing) or 0, tonumber(sync.queueFailed) or 0)
+        end
+        if (tonumber(sync.pendingProfiles) or 0) > 50 then
+            lines[#lines + 1] = "Large queue: /nsr queue explains the Windows Process Queue shortcut."
+        end
         lines[#lines + 1] = "Status reflects the last login or /reload."
     end
     if type(sync.availableVersion) == "string" and UI.NewerVersion(sync.availableVersion, UI.version) then

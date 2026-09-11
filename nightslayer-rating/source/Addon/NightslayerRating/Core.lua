@@ -925,6 +925,8 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         print("Current uses current-season cutoffs. Lifetime Peak/Observed uses frozen S2 cutoffs as a color guide, not an earned-title claim.")
     elseif command == "lookup" or command == "search" then
         UI.OpenSearch(rest)
+    elseif command == "queue" then
+        print("|cffffd200Nightslayer Rating:|r /reload to save requests, then open Nightslayer Rating > Process Queue in the Windows Start menu. It saves every 50 attempts; Q stops after the current request. /reload again to load results.")
     elseif command == "upgrade" then
         print("|cffffd200Nightslayer Rating:|r close WoW and run Upgrade.cmd from the Windows bundle or the Nightslayer Rating folder in your Start menu.")
     else
@@ -961,6 +963,6 @@ SlashCmdList.NIGHTSLAYERRATING = function(message)
         ))
         print("Installed version: " .. UI.version)
         for _, line in ipairs(UI.StatusLines(data, true)) do print(line) end
-        print("Commands: /nsr search [NAME-REALM], /nsr options, /nsr status, /nsr on, /nsr off, /nsr cutoffs, /nsr lookup [NAME-REALM], /nsr upgrade")
+        print("Commands: /nsr search [NAME-REALM], /nsr queue, /nsr options, /nsr status, /nsr on, /nsr off, /nsr cutoffs, /nsr lookup [NAME-REALM], /nsr upgrade")
     end
 end

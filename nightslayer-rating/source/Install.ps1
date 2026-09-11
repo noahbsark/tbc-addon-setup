@@ -161,7 +161,7 @@ function Install-NsrPackage {
         foreach ($item in @(Get-ChildItem -LiteralPath $updaterSource -File)) {
             Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $UpdaterTarget $item.Name) -Force
         }
-        foreach ($name in @('Upgrade.cmd', 'Update Now.cmd')) {
+        foreach ($name in @('Upgrade.cmd', 'Update Now.cmd', 'Process Queue.cmd')) {
             Copy-Item -LiteralPath (Join-Path $SourcePath $name) -Destination (Join-Path $UpdaterTarget $name) -Force
         }
         $config = @{ WowPath = $GamePath; Realm = 'Nightslayer'; Realms = @('Nightslayer', 'Dreamscythe'); Region = 'US' } | ConvertTo-Json
@@ -191,13 +191,13 @@ function Install-NsrShortcuts {
         $folder = Join-Path ([Environment]::GetFolderPath('Programs')) 'Nightslayer Rating'
         [void][IO.Directory]::CreateDirectory($folder)
         $shell = New-Object -ComObject WScript.Shell
-        foreach ($name in @('Upgrade', 'Update Now')) {
+        foreach ($name in @('Upgrade', 'Update Now', 'Process Queue')) {
             $shortcut = $shell.CreateShortcut((Join-Path $folder ($name + '.lnk')))
             $shortcut.TargetPath = Join-Path $UpdaterTarget ($name + '.cmd')
             $shortcut.WorkingDirectory = $UpdaterTarget
             $shortcut.Save()
         }
-    } catch { Write-Warning 'Start menu shortcuts were unavailable. Upgrade.cmd and Update Now.cmd still work from the extracted bundle.' }
+    } catch { Write-Warning 'Start menu shortcuts were unavailable. Upgrade.cmd, Update Now.cmd and Process Queue.cmd still work from the extracted bundle.' }
 }
 
 Write-Host ''

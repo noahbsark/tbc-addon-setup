@@ -57,7 +57,7 @@ function UI.OpenSearch(query)
         note:SetPoint("BOTTOMLEFT", 20, 20)
         note:SetWidth(565)
         note:SetJustifyH("LEFT")
-        note:SetText("Results use the loaded cache. To process a new request: /reload to save it, run Update Now in Windows, then /reload to load the result.\nHistory covers locally tracked players; snapshots are not live match results.")
+        note:SetText("Results use the loaded cache. /reload to save requests, run Update Now or Process Queue in Windows, then /reload to load results.\nHistory covers locally tracked players; snapshots are not live match results.")
         show("Enter a player name to view Current, Peak and highest known arena title.\nAdd -Realm when searching the other realm.")
     end
     panel:Show()
