@@ -98,12 +98,12 @@ try {
     Assert ($cache.status.queueMissing -eq 1 -and $cache.status.queueFailed -eq 1 -and $cache.status.pendingProfiles -eq 1) 'Unavailable and retry counts were confused'
     Assert ($cache.status.queueState -eq 'complete') 'Attempted-all pass was not completed'
 
-    foreach ($mode in @('offline', 'throttled', 'invalid')) {
+    foreach ($scenario in @('offline', 'throttled', 'invalid')) {
         $cache = Reset-Fixture 850
-        $script:mode = $mode
+        $script:mode = $scenario
         [void](Sync-QueuedProfiles $cache 'unused' -DrainQueue -AddonDirectory $directory)
-        $expected = $(if ($mode -eq 'throttled') { 1 } else { 5 })
-        Assert ($script:fetched.Count -eq $expected) ('Did not stop promptly for ' + $mode)
+        $expected = $(if ($scenario -eq 'throttled') { 1 } else { 5 })
+        Assert ($script:fetched.Count -eq $expected) ('Did not stop promptly for ' + $scenario)
         Assert ($cache.status.queueState -eq 'paused' -and $cache.status.pendingProfiles -eq 850) 'Source outage lost queued work'
         Assert (@($cache.players.Values | Where-Object { $_.exactFetchedAt -gt 0 }).Count -eq 0) 'Invalid or failed response became an exact profile'
     }
