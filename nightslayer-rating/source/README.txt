@@ -1,4 +1,42 @@
-NIGHTSLAYER RATING 1.3.1
+NIGHTSLAYER RATING 1.4.1
+
+WHAT CHANGED IN 1.4.1
+- /nsr search [Name-Realm] opens a player search window. /nsr lookup is an
+  alias. A bare name uses your supported home realm. Search shows cached
+  Current, Peak, highest known title, source dates and profile lookup status.
+- Unlisted players retain a Last known current-season rating with its age.
+  Undated or older-than-48-hour ratings are also labeled Last known. Missing
+  data does not mean zero. Older sources cannot replace a newer dated rating.
+- Locally tracked players collect up to 32 daily observations per bracket
+  over 31 days. Search and Shift-hover show the actual observed change over
+  up to seven days. History starts with tracking and is never uploaded.
+  Repeated source timestamps add no samples. Season rollover clears current
+  ratings and history while retaining lifetime peaks and fixed S2 colors.
+- The release workflow tests and packages both ZIPs from one snapshot, checks
+  source/TOC/bootstrap/checksum agreement, and prepares a reviewable release PR.
+
+WHAT CHANGED IN 1.4.0
+---------------------
+- /nsr options opens independent tooltip/whisper switches, bracket filters,
+  compact mode, cutoff-distance details, and known-title preferences.
+- Hold Shift before hovering for details, including distance to the next
+  current-season cutoff. The main rows remain Current and lifetime Peak.
+- /nsr status reports source data age, individual bracket dates when available,
+  the latest download result, and pending or unavailable peak lookups. Cached
+  data is no longer labeled fresh just because a local file was rewritten.
+- Your own characters and priority players viewed within three days get daily
+  exact-profile refreshes. Other profiles retain the weekly cache. The updater
+  still requests at most 50 profiles per run and rotates persistent failures.
+- The companion checks for new addon versions daily. After this initial
+  installation, use Upgrade.cmd (or Nightslayer Rating > Upgrade in the Windows
+  Start menu) with WoW closed. Downloads are checked against the release's
+  SHA256 before installation. Existing data is preserved, the previous install
+  is backed up, and failed file replacement attempts restore the backup.
+- Highest known arena title uses the game's owned-title list for your character
+  and titles actually displayed by other visible players. This is a local
+  observation, not a complete history for every Group Finder player. Missing
+  titles are omitted. English arena-title names are currently recognized.
+  Website placements and rating colors are never treated as earned titles.
 TBC Anniversary (Interface 20506) - Nightslayer and Dreamscythe US
 
 WHAT CHANGED IN 1.3.1
@@ -156,13 +194,21 @@ rollover changes Current while the Peak comparison remains fixed to S2.
 OPTIONAL COMMANDS
 -----------------
 /nsr                              Show cache status
+/nsr status                       Show download result and source data age
+/nsr options                      Open display preferences
+/nsr upgrade                      Explain the Windows version-upgrade step
 /nsr on                           Enable tooltip and chat additions
 /nsr off                          Disable tooltip and chat additions
 /nsr cutoffs                      Show current/S2 comparison cutoff details
-/nsr lookup Reefey                Queue a Nightslayer character
-/nsr lookup Player-Dreamscythe    Queue a Dreamscythe character
+/nsr search                       Open player search
+/nsr lookup Reefey-Nightslayer     Search and queue a Nightslayer character
+/nsr lookup Player-Dreamscythe     Search and queue a Dreamscythe character
 
 "Update Now.cmd" is included for troubleshooting; normal use does not require it.
+Data refreshes continue hourly and at Windows sign-in. New code versions are
+installed only when you launch Upgrade.cmd. Version and download status become
+visible in game at login or /reload. Backups are kept in
+%LOCALAPPDATA%\NightslayerRatingBackups; the uninstaller leaves them available.
 
 WHY CLIENTS DO NOT WRITE TO GITHUB
 ----------------------------------

@@ -18,6 +18,10 @@ $Region = 'US'
 $SharedSnapshotMaxPlayers = 100000
 $SharedSnapshotMaxCompressedBytes = 10485760
 $SharedSnapshotMaxJsonChars = 52428800
+$UpdaterVersion = '1.4.0'
+$ProfileRefreshSeconds = 604800
+$ActiveProfileRefreshSeconds = 86400
+$ActivePlayerSeconds = 259200
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('nsr-test-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($directory)
@@ -26,6 +30,7 @@ $BundledSnapshotPath = Join-Path $directory 'BundledSnapshot.json.gz'
 $script:logs = @()
 function Write-Log { param([string]$Message) $script:logs += $Message }
 function Start-Sleep { param($Milliseconds, $Seconds) }
+function Get-NsrRelease { return [pscustomobject]@{ version = '1.4.0' } }
 function Assert { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
 
 try {
@@ -98,6 +103,14 @@ try {
     Assert ($lua.Contains('2058, 0, 0, 2900, 0, 0, 2481, 0, 0')) 'Nine-value shared row missing'
     Assert ($lua.Contains('previous = { [2] = 2481 }')) 'Named previous rating missing'
     Assert ($lua.Contains('2803, 2481, 1944, 1629, 1458')) 'Frozen Lua cutoffs missing'
+    Assert ($lua.Contains('exactBrackets = { [2] = true }')) 'Exact peak provenance missing'
+    $player.current['3'] = 2400
+    $player.bestSeen['3'] = 2400
+    $player.exactBest['3'] = 2300
+    [void](Write-LuaData $cache $directory)
+    $lua = Get-Content (Join-Path $directory 'Data.lua') -Raw
+    Assert ($lua.Contains('best = { [2] = 2900, [3] = 2400 }')) 'Newly observed high was hidden by an older exact peak'
+    Assert ($lua.Contains('exactBrackets = { [2] = true }')) 'Observed high was mislabeled as exact'
     Save-Cache $cache
     $roundtrip = Read-Cache
     Assert ($roundtrip.cutoffs['3']['2'].thresholds[0] -eq 2199) 'Cutoffs lost on disk'
@@ -180,6 +193,8 @@ try {
     $written = Get-Content (Join-Path $directory 'Data.lua') -Raw
     Assert ($written.Contains('2100, 0, 0, 2900, 0, 0')) 'Legacy ratings were not written to Lua'
     Assert ($script:profilePasses -eq 1) 'Legacy import skipped exact profile lookups'
+    Assert ($fresh.status.mode -eq 'shared') 'Successful legacy download has wrong status'
+    Assert ($fresh.status.lastSuccess -gt 0) 'Successful download timestamp missing'
 
     $legacy.version = 4
     Assert (Import-SharedSnapshot $fresh ($legacy | ConvertTo-Json -Depth 12 | ConvertFrom-Json)) 'v4 compatibility failed'
@@ -202,6 +217,10 @@ try {
     $written = Get-Content (Join-Path $directory 'Data.lua') -Raw
     Assert ($written.Contains('2058, 2006, 2078, 2900, 0, 0')) 'Offline install overwrote bundled ratings'
     Assert ($script:profilePasses -eq 2) 'Bulk failure aborted later update stages'
+    Assert ($offline.status.mode -eq 'cached') 'Outage was advertised as a fresh download'
+    Assert ($offline.status.lastSuccess -eq 0) 'Offline bootstrap was counted as a download'
+    $status = Get-Content (Join-Path $directory 'SyncStatus.lua') -Raw
+    Assert ($status.Contains('mode = "cached"')) 'Outage did not reach the addon'
 
     # One successful bracket must not erase the two failed brackets, and must
     # refresh the shared row that the addon actually prefers for non-exact data.
@@ -215,6 +234,9 @@ try {
     Assert ($offline.sharedPlayers[$hash].current['2'] -eq 2058) 'Failed 2v2 refresh erased its cache'
     Assert ($offline.sharedPlayers[$hash].current['3'] -eq 2200) 'Fresh fallback was masked by old shared 3v3'
     Assert ($offline.sharedPlayers[$hash].current['5'] -eq 2078) 'Empty 5v5 response erased its cache'
+    Assert ($offline.status.mode -eq 'partial') 'Partial bracket failure has wrong status'
+    Assert ($offline.leaderboardUpdates.ContainsKey('3')) 'Successful bracket source timestamp missing'
+    Assert (-not $offline.leaderboardUpdates.ContainsKey('2')) 'Failed bracket was marked fresh'
 
     # An install without any bootstrap cache must not replace existing Data.lua
     # with an empty player table when every network request fails.
@@ -224,6 +246,11 @@ try {
     $before = Get-Content (Join-Path $directory 'Data.lua') -Raw
     Update-RatingData $empty $directory $directory
     Assert ((Get-Content (Join-Path $directory 'Data.lua') -Raw) -eq $before) 'Empty offline update replaced existing addon data'
+    Assert ((Get-Content (Join-Path $directory 'SyncStatus.lua') -Raw).Contains('mode = "cached"')) 'Empty update did not write failure status separately'
+    $now = Get-UnixTime
+    Assert ((Get-ProfileRefreshInterval @{ Priority = $true; Stamp = $now } $now) -eq 86400) 'Active player is not refreshed daily'
+    Assert ((Get-ProfileRefreshInterval @{ Priority = $true; Stamp = $now - 4 * 86400 } $now) -eq 604800) 'Inactive player should retain weekly caching'
+    Assert ((Get-ProfileRefreshInterval @{ Priority = $false; Stamp = $now } $now) -eq 604800) 'Bulk leaderboard browsing should retain weekly caching'
     Write-Output 'Updater cutoff refresh, failure retention, cache migration, rendering and rollover tests passed'
 } finally {
     Remove-Item -LiteralPath $directory -Recurse -Force

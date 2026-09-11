@@ -78,9 +78,14 @@ data.players = {
     ["Nightslayer|Twinname"] = {
         name = "Twinname", realm = "Nightslayer", exact = true,
         current = { [2] = 2058 }, previous = { [2] = 2481 }, best = { [2] = 2900 },
+        currentUpdated = { [2] = time() },
     },
 }
 NightslayerRatingData = data
+dofile(addon .. "Options.lua")
+dofile(addon .. "TitleTracker.lua")
+dofile(addon .. "Status.lua")
+dofile(addon .. "PlayerDetails.lua")
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(#messages == 1)
@@ -106,13 +111,14 @@ data.players["Nightslayer|Twinname"][7] = 2481
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(not messages[3]:find("S2 ", 1, true))
-assert(messages[3]:find("Inactive", 1, true))
+assert(messages[3]:find("No current data", 1, true))
 
 -- An identical lifetime peak gets a different S2 color in each bracket;
 -- S3 color changes must never recolor that fixed historical comparison.
 data.players = { ["Nightslayer|Twinname"] = {
     name = "Twinname", realm = "Nightslayer", exact = true,
     current = { [2] = 2400, [3] = 2400, [5] = 2400 },
+    currentUpdated = { [2] = time(), [3] = time(), [5] = time() },
     best = { [2] = 2400, [3] = 2400, [5] = 2400 },
 } }
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
@@ -126,4 +132,34 @@ assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(messages[5]:find("Current S3 |cffa335ee2400|r", 1, true))
 assert(messages[5]:find("Peak |cff0070dd2400|r", 1, true))
+
+-- Preferences gate the actual event handlers without suppressing other surfaces.
+NightslayerRatingSettings.whispers = false
+events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Othername-Nightslayer")
+assert(#messages == 5)
+NightslayerRatingSettings.whispers = true
+NightslayerRatingSettings.units = false
+wipe(lines)
+GameTooltip.NightslayerRatingToken = nil
+hooks.OnTooltipSetUnit(GameTooltip)
+assert(#lines == 0)
+NightslayerRatingSettings.units = true
+NightslayerRatingSettings.bracket3 = false
+NightslayerRatingSettings.bracket5 = false
+IsShiftKeyDown = function() return true end
+hooks.OnTooltipSetUnit(GameTooltip)
+tooltip = table.concat(lines, "\n")
+assert(tooltip:find("2v2", 1, true) and not tooltip:find("3v3", 1, true))
+assert(tooltip:find("100 below Rank One cutoff", 1, true))
+NightslayerRatingSettings.nextCutoff = false
+wipe(lines)
+GameTooltip.NightslayerRatingToken = nil
+hooks.OnTooltipSetUnit(GameTooltip)
+assert(not table.concat(lines, "\n"):find("below Rank One", 1, true))
+data.players["Nightslayer|Twinname"].exactBrackets = { [3] = true }
+wipe(lines)
+GameTooltip.NightslayerRatingToken = nil
+hooks.OnTooltipSetUnit(GameTooltip)
+assert(table.concat(lines, "\n"):find("Observed |cff0070dd2400|r*", 1, true))
+assert(not table.concat(lines, "\n"):find("Peak |cff0070dd2400|r", 1, true))
 print("Rating color boundaries, season isolation, tooltip and whisper tests passed")

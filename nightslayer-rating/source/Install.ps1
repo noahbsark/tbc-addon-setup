@@ -124,9 +124,88 @@ function Register-AutomaticUpdater {
     return $registered
 }
 
+function Install-NsrPackage {
+    param([string]$SourcePath, [string]$GamePath, [string]$UpdaterTarget, [string]$BackupRoot)
+    $addonSource = Join-Path $SourcePath 'Addon\NightslayerRating'
+    $updaterSource = Join-Path $SourcePath 'Updater'
+    $addonTarget = Join-Path $GamePath 'Interface\AddOns\NightslayerRating'
+    foreach ($required in @('NightslayerRating.toc', 'Core.lua', 'Options.lua', 'TitleTracker.lua', 'Status.lua')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $addonSource $required))) { throw ('Package is missing ' + $required) }
+    }
+    foreach ($required in @('NightslayerRatingUpdater.ps1', 'RunUpdater.vbs', 'Release.ps1', 'Upgrade.ps1', 'Season2Cutoffs.json')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $updaterSource $required))) { throw ('Package is missing ' + $required) }
+    }
+    $mutex = New-Object Threading.Mutex($false, 'Local\NightslayerRatingUpdater')
+    $locked = $false
+    $copyStarted = $false
+    $addonExisted = Test-Path -LiteralPath $addonTarget
+    $updaterExisted = Test-Path -LiteralPath $UpdaterTarget
+    $backup = Join-Path $BackupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+    try {
+        $locked = $mutex.WaitOne(0)
+        if (-not $locked) { throw 'The rating updater is running. Let it finish, then run the installer again.' }
+        if ($addonExisted -or $updaterExisted) {
+            [void][IO.Directory]::CreateDirectory($backup)
+            if ($addonExisted) { Copy-Item -LiteralPath $addonTarget -Destination (Join-Path $backup 'Addon') -Recurse -Force }
+            if ($updaterExisted) { Copy-Item -LiteralPath $UpdaterTarget -Destination (Join-Path $backup 'Updater') -Recurse -Force }
+            Write-Host ('Previous installation backed up to: ' + $backup)
+        }
+        $copyStarted = $true
+        [void][IO.Directory]::CreateDirectory($addonTarget)
+        [void][IO.Directory]::CreateDirectory($UpdaterTarget)
+        foreach ($item in @(Get-ChildItem -LiteralPath $addonSource -Force)) {
+            # These generated files may already be newer than the bundled data.
+            if ($item.Name -in @('Data.lua', 'SyncStatus.lua') -and (Test-Path -LiteralPath (Join-Path $addonTarget $item.Name))) { continue }
+            Copy-Item -LiteralPath $item.FullName -Destination $addonTarget -Recurse -Force
+        }
+        foreach ($item in @(Get-ChildItem -LiteralPath $updaterSource -File)) {
+            Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $UpdaterTarget $item.Name) -Force
+        }
+        foreach ($name in @('Upgrade.cmd', 'Update Now.cmd')) {
+            Copy-Item -LiteralPath (Join-Path $SourcePath $name) -Destination (Join-Path $UpdaterTarget $name) -Force
+        }
+        $config = @{ WowPath = $GamePath; Realm = 'Nightslayer'; Realms = @('Nightslayer', 'Dreamscythe'); Region = 'US' } | ConvertTo-Json
+        [IO.File]::WriteAllText((Join-Path $UpdaterTarget 'config.json'), $config, $Utf8NoBom)
+    } catch {
+        $originalError = $_
+        if ($copyStarted) {
+            try {
+                if (Test-Path -LiteralPath $addonTarget) { Remove-Item -LiteralPath $addonTarget -Recurse -Force }
+                if (Test-Path -LiteralPath $UpdaterTarget) { Remove-Item -LiteralPath $UpdaterTarget -Recurse -Force }
+                if ($addonExisted) { Copy-Item -LiteralPath (Join-Path $backup 'Addon') -Destination $addonTarget -Recurse -Force }
+                if ($updaterExisted) { Copy-Item -LiteralPath (Join-Path $backup 'Updater') -Destination $UpdaterTarget -Recurse -Force }
+                Write-Warning 'Installation failed; the previous installation was restored.'
+            } catch { Write-Warning ('Automatic restore failed. Your backup is at: ' + $backup) }
+        }
+        throw $originalError
+    } finally {
+        if ($locked) { [void]$mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+    return $addonTarget
+}
+
+function Install-NsrShortcuts {
+    param([string]$UpdaterTarget)
+    try {
+        $folder = Join-Path ([Environment]::GetFolderPath('Programs')) 'Nightslayer Rating'
+        [void][IO.Directory]::CreateDirectory($folder)
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($name in @('Upgrade', 'Update Now')) {
+            $shortcut = $shell.CreateShortcut((Join-Path $folder ($name + '.lnk')))
+            $shortcut.TargetPath = Join-Path $UpdaterTarget ($name + '.cmd')
+            $shortcut.WorkingDirectory = $UpdaterTarget
+            $shortcut.Save()
+        }
+    } catch { Write-Warning 'Start menu shortcuts were unavailable. Upgrade.cmd and Update Now.cmd still work from the extracted bundle.' }
+}
+
 Write-Host ''
 Write-Host 'Nightslayer Rating installer' -ForegroundColor Yellow
 Write-Host 'Finding the TBC Anniversary installation...'
+if (@(Get-Process -Name Wow, WowClassic, WowClassicT, WowT -ErrorAction SilentlyContinue).Count -gt 0) {
+    throw 'Close World of Warcraft before running Install.cmd.'
+}
 
 $resolvedWowPath = Find-AnniversaryPath
 if ($null -eq $resolvedWowPath) {
@@ -136,35 +215,10 @@ if ($null -eq $resolvedWowPath) {
     throw 'TBC Anniversary was not found. In Battle.net, use the cog beside Play > Show in Explorer, then run this installer again.'
 }
 
-$addonSource = Join-Path $PSScriptRoot 'Addon\NightslayerRating'
-$updaterSource = Join-Path $PSScriptRoot 'Updater'
-if (-not (Test-Path -LiteralPath (Join-Path $addonSource 'NightslayerRating.toc'))) {
-    throw 'The package is incomplete: the addon source files are missing.'
-}
-
-$addonTarget = Join-Path $resolvedWowPath 'Interface\AddOns\NightslayerRating'
 $updaterTarget = Join-Path $env:LOCALAPPDATA 'NightslayerRating'
-[void][IO.Directory]::CreateDirectory($addonTarget)
-[void][IO.Directory]::CreateDirectory($updaterTarget)
-
-foreach ($item in @(Get-ChildItem -LiteralPath $addonSource -Force)) {
-    Copy-Item -LiteralPath $item.FullName -Destination $addonTarget -Recurse -Force
-}
-foreach ($name in @('NightslayerRatingUpdater.ps1', 'RunUpdater.vbs', 'Season2Cutoffs.json')) {
-    Copy-Item -LiteralPath (Join-Path $updaterSource $name) -Destination (Join-Path $updaterTarget $name) -Force
-}
-$bundledSnapshot = Join-Path $updaterSource 'BundledSnapshot.json.gz'
-if (Test-Path -LiteralPath $bundledSnapshot) {
-    Copy-Item -LiteralPath $bundledSnapshot -Destination (Join-Path $updaterTarget 'BundledSnapshot.json.gz') -Force
-}
-
-$config = @{
-    WowPath = $resolvedWowPath
-    Realm = 'Nightslayer'
-    Realms = @('Nightslayer', 'Dreamscythe')
-    Region = 'US'
-} | ConvertTo-Json
-[IO.File]::WriteAllText((Join-Path $updaterTarget 'config.json'), $config, $Utf8NoBom)
+$backupRoot = Join-Path $env:LOCALAPPDATA 'NightslayerRatingBackups'
+$addonTarget = Install-NsrPackage -SourcePath $PSScriptRoot -GamePath $resolvedWowPath -UpdaterTarget $updaterTarget -BackupRoot $backupRoot
+Install-NsrShortcuts -UpdaterTarget $updaterTarget
 
 Write-Host ('Installed addon to: ' + $addonTarget) -ForegroundColor Green
 Write-Host 'Downloading the shared Nightslayer and Dreamscythe rating cache...'
@@ -186,3 +240,5 @@ if ($scheduled) {
     Write-Host 'Ratings will refresh automatically at Windows sign-in.'
 }
 Write-Host 'Start or restart TBC Anniversary, then hover a Group Finder name.'
+Write-Host 'Use /nsr options for display settings and /nsr status for data age.'
+Write-Host 'Future addon versions: close WoW, then choose Nightslayer Rating > Upgrade in the Start menu.'

@@ -22,6 +22,9 @@ $ProfileLimitPerRun = 50
 $ProfileSuccessDelayMilliseconds = 500
 $ProfileErrorDelayMilliseconds = 3000
 $ProfileRefreshSeconds = 604800
+$ActiveProfileRefreshSeconds = 86400
+$ActivePlayerSeconds = 3 * 86400
+$UpdaterVersion = '1.4.1'
 $RequestRetentionSeconds = 2592000
 $ExactCacheRetentionSeconds = 7776000
 $PriorityOffset = 2000000000
@@ -31,6 +34,7 @@ $CachePath = Join-Path $UpdaterDirectory 'cache.json'
 $BundledSnapshotPath = Join-Path $UpdaterDirectory 'BundledSnapshot.json.gz'
 $LogPath = Join-Path $UpdaterDirectory 'updater.log'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+. (Join-Path $UpdaterDirectory 'Release.ps1')
 
 function Get-UnixTime {
     return [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -173,6 +177,92 @@ function Convert-SharedRatingMap {
     return $map
 }
 
+function Convert-UpdateTimes {
+    param($Object)
+    $map = @{}
+    $now = Get-UnixTime
+    foreach ($bracket in @(2, 3, 5)) {
+        $stamp = [int64]((Get-ObjectProperty $Object ([string]$bracket)) -as [int64])
+        if ($stamp -gt 0 -and $stamp -le ($now + 3600)) { $map[[string]$bracket] = $stamp }
+    }
+    return $map
+}
+
+function Get-ProfileRefreshInterval {
+    param($Request, [int64]$Now)
+    $stamp = [int64]((Get-ObjectProperty $Request 'Stamp') -as [int64])
+    if ([bool](Get-ObjectProperty $Request 'Priority') -and $stamp -le ($Now + 3600) -and
+        $stamp -ge ($Now - $ActivePlayerSeconds)) { return $ActiveProfileRefreshSeconds }
+    return $ProfileRefreshSeconds
+}
+
+function Convert-SourceTime {
+    param($Value)
+    $number = $Value -as [double]
+    if ($null -eq $number) { return 0L }
+    if ($number -gt 100000000000) { $number /= 1000 }
+    if ($number -le 0 -or $number -gt ((Get-UnixTime) + 3600)) { return 0L }
+    return [int64][Math]::Floor($number)
+}
+
+function Convert-RatingHistory {
+    param($Object)
+    $result = @{}
+    $oldest = (Get-UnixTime) - 31 * 86400
+    foreach ($bracket in @(2, 3, 5)) {
+        $days = @{}
+        foreach ($sample in @(Get-ObjectProperty $Object ([string]$bracket))) {
+            $stamp = Convert-SourceTime (Get-ObjectProperty $sample 'at')
+            $rating = (Get-ObjectProperty $sample 'rating') -as [int]
+            if ($stamp -lt $oldest -or $rating -lt 1 -or $rating -gt 10000) { continue }
+            $day = [string][Math]::Floor($stamp / 86400)
+            if (-not $days.ContainsKey($day) -or $stamp -gt $days[$day].at) {
+                $days[$day] = @{ at = $stamp; rating = $rating }
+            }
+        }
+        $result[[string]$bracket] = @($days.Values | Sort-Object at | Select-Object -Last 32)
+    }
+    return $result
+}
+
+function Set-CurrentRating {
+    param([hashtable]$Player, [int]$Bracket, [int]$Rating, [int64]$Updated)
+    $key = [string]$Bracket
+    $oldStamp = [int64]((Get-ObjectProperty $Player.currentUpdated $key) -as [int64])
+    # Missing timestamps must never let an older/unknown source replace a dated row.
+    if ($Rating -lt 1 -or $Rating -gt 10000 -or $Updated -lt $oldStamp) { return }
+    $Player.current[$key] = $Rating
+    $Player.currentUpdated[$key] = $Updated
+    [void]$Player.currentLastKnown.Remove($key)
+    if ($Player.tracking -and $Updated -gt 0) {
+        $samples = @(Get-ObjectProperty $Player.history $key) | Where-Object { $null -ne $_ }
+        $Player.history[$key] = @($samples) + @(@{ at = $Updated; rating = $Rating })
+        $Player.history = Convert-RatingHistory $Player.history
+    }
+}
+
+function Mark-CurrentRatingMissing {
+    param([hashtable]$Player, [int]$Bracket, [int64]$Updated)
+    $key = [string]$Bracket
+    $oldStamp = [int64]((Get-ObjectProperty $Player.currentUpdated $key) -as [int64])
+    if ($Player.current.ContainsKey($key) -and $Updated -ge $oldStamp) {
+        $Player.currentLastKnown[$key] = 1
+    }
+}
+
+function Sync-PlayerCurrentFromShared {
+    param([hashtable]$Player, [hashtable]$SharedPlayers, [hashtable]$Updates)
+    $hash = Get-LookupHash -Name $Player.name -Realm $Player.realm
+    $row = Get-ObjectProperty $SharedPlayers $hash
+    $ratings = Get-ObjectProperty $row 'current'
+    foreach ($bracket in @(2, 3, 5)) {
+        $stamp = [int64]((Get-ObjectProperty $Updates ([string]$bracket)) -as [int64])
+        $rating = [int]((Get-ObjectProperty $ratings ([string]$bracket)) -as [int])
+        if ($rating -gt 0) { Set-CurrentRating $Player $bracket $rating $stamp }
+        else { Mark-CurrentRatingMissing $Player $bracket $stamp }
+    }
+}
+
 function New-Cache {
     $cache = @{
         version = 6
@@ -181,6 +271,9 @@ function New-Cache {
         cutoffs = @{}
         syncedSeasons = @()
         lastLeaderboardUpdated = 0
+        leaderboardUpdates = @{}
+        status = @{ mode = 'bundled'; lastAttempt = 0; lastSuccess = 0; pendingProfiles = 0
+            failedProfiles = 0; unavailableProfiles = 0; lastVersionCheck = 0; availableVersion = '' }
         sharedGenerated = 0
         sharedCounts = @{ Nightslayer = 0; Dreamscythe = 0 }
         sharedPlayers = @{}
@@ -240,9 +333,14 @@ function Set-CacheSeason {
     if ($Season -ne $Cache.currentSeason) {
         foreach ($player in @($Cache.players.Values) + @($Cache.sharedPlayers.Values)) {
             $player.current = @{}
+            $player.currentUpdated = @{}
+            $player.currentLastKnown = @{}
+            $player.history = @{}
             $player.previous = @{}
         }
         $Cache.syncedSeasons = @()
+        $Cache.leaderboardUpdates = @{}
+        $Cache.lastLeaderboardUpdated = 0
     }
     $Cache.currentSeason = $Season
     $Cache.previousSeason = [Math]::Max(0, $Season - 1)
@@ -300,6 +398,15 @@ function Read-Cache {
             Set-CacheSeason -Cache $cache -Season ([int]$season)
         }
         Merge-Cutoffs -Cache $cache -Object (Get-ObjectProperty $raw 'cutoffs')
+        $cache.leaderboardUpdates = Convert-UpdateTimes (Get-ObjectProperty $raw 'leaderboardUpdates')
+        $savedStatus = Get-ObjectProperty $raw 'status'
+        foreach ($key in @('lastAttempt', 'lastSuccess', 'lastVersionCheck', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles')) {
+            $cache.status[$key] = [Math]::Max(0, [int64]((Get-ObjectProperty $savedStatus $key) -as [int64]))
+        }
+        foreach ($key in @('mode', 'availableVersion')) {
+            $value = [string](Get-ObjectProperty $savedStatus $key)
+            if ($value.Length -le 32) { $cache.status[$key] = $value }
+        }
 
         $lastUpdated = Get-ObjectProperty $raw 'lastLeaderboardUpdated'
         if ($null -ne $lastUpdated) {
@@ -336,10 +443,15 @@ function Read-Cache {
 
                 $record = Get-PlayerRecord -Cache $cache -Name $name -Realm $realm
                 $record.current = Convert-RatingMap (Get-ObjectProperty $value 'current')
+                $record.currentUpdated = Convert-UpdateTimes (Get-ObjectProperty $value 'currentUpdated')
+                $record.currentLastKnown = Convert-RatingMap (Get-ObjectProperty $value 'currentLastKnown')
+                $record.history = Convert-RatingHistory (Get-ObjectProperty $value 'history')
+                $record.tracking = (Get-ObjectProperty $value 'tracking') -eq $true
                 $record.previous = Convert-SharedRatingMap (Get-ObjectProperty $value 'previous')
                 $record.bestSeen = Convert-RatingMap (Get-ObjectProperty $value 'bestSeen')
                 $record.exactBest = Convert-RatingMap (Get-ObjectProperty $value 'exactBest')
                 $record.exactFetchedAt = [int64]((Get-ObjectProperty $value 'exactFetchedAt') -as [int64])
+                $record.profileAttemptAt = [int64]((Get-ObjectProperty $value 'profileAttemptAt') -as [int64])
                 $record.lastSeen = [int64]((Get-ObjectProperty $value 'lastSeen') -as [int64])
                 $record.notFoundUntil = [int64]((Get-ObjectProperty $value 'notFoundUntil') -as [int64])
             }
@@ -462,10 +574,15 @@ function Get-PlayerRecord {
             name = $Name
             realm = $canonicalRealm
             current = @{}
+            currentUpdated = @{}
+            currentLastKnown = @{}
+            history = @{}
+            tracking = $false
             previous = @{}
             bestSeen = @{}
             exactBest = @{}
             exactFetchedAt = 0
+            profileAttemptAt = 0
             lastSeen = 0
             notFoundUntil = 0
         }
@@ -492,7 +609,7 @@ function Invoke-IronForgeJson {
         try {
             return Invoke-RestMethod -Uri $uri -Method Get -UseBasicParsing -TimeoutSec 45 -Headers @{
                 'Accept' = 'application/json'
-                'User-Agent' = 'NightslayerRating/1.3.1 (local WoW addon updater; adaptive-rate cache)'
+                'User-Agent' = 'NightslayerRating/1.4.0 (local WoW addon updater; adaptive-rate cache)'
             }
         } catch {
             $statusCode = $null
@@ -632,7 +749,13 @@ function Sync-SharedSnapshot {
     param([hashtable]$Cache)
 
     $snapshot = Get-SharedSnapshot
-    return Import-SharedSnapshot -Cache $Cache -Snapshot $snapshot
+    $oldUpdated = $Cache.lastLeaderboardUpdated
+    $worked = Import-SharedSnapshot -Cache $Cache -Snapshot $snapshot
+    if ($worked) {
+        $Cache.status.mode = $(if ([int64](Get-ObjectProperty $snapshot 'leaderboardUpdated') -lt $oldUpdated) { 'retained' } else { 'shared' })
+        $Cache.status.lastSuccess = Get-UnixTime
+    }
+    return $worked
 }
 
 function Import-SharedSnapshot {
@@ -720,7 +843,7 @@ function Import-SharedSnapshot {
     # Version 2/3 caches stored thousands of bulk names locally. Keep only exact
     # profiles now that bulk ratings live in the pseudonymous shared table.
     foreach ($key in @($Cache.players.Keys)) {
-        if ([int64]$Cache.players[$key].exactFetchedAt -le 0 -and
+        if (-not $Cache.players[$key].tracking -and [int64]$Cache.players[$key].exactFetchedAt -le 0 -and
             [int64]$Cache.players[$key].notFoundUntil -le $now) {
             [void]$Cache.players.Remove($key)
         }
@@ -729,22 +852,21 @@ function Import-SharedSnapshot {
     # Preserve private exact highs while refreshing their current values from the
     # newer shared row when that character is present on a leaderboard.
     Set-CacheSeason -Cache $Cache -Season $season
+    $updates = Convert-UpdateTimes (Get-ObjectProperty $snapshot 'leaderboardUpdates')
     foreach ($player in @($Cache.players.Values)) {
-        $player.current = @{}
+        Sync-PlayerCurrentFromShared $player $newSharedPlayers $updates
         if (-not $legacy) { $player.previous = @{} }
         $hash = Get-LookupHash -Name ([string]$player.name) -Realm ([string]$player.realm)
         if ($null -eq $hash -or -not $newSharedPlayers.ContainsKey($hash)) {
             continue
         }
-        $sharedCurrent = $newSharedPlayers[$hash].current
         if (-not $legacy -or $newSharedPlayers[$hash].previous.Count -gt 0) {
             $player.previous = Convert-SharedRatingMap $newSharedPlayers[$hash].previous
         }
         foreach ($bracket in @(2, 3, 5)) {
             $key = [string]$bracket
-            if ($sharedCurrent.ContainsKey($key)) {
-                $player.current[$key] = [int]$sharedCurrent[$key]
-            }
+            $player.bestSeen[$key] = [Math]::Max((Get-CachedRating $player.bestSeen $bracket),
+                (Get-CachedRating $newSharedPlayers[$hash].bestSeen $bracket))
         }
     }
 
@@ -753,6 +875,7 @@ function Import-SharedSnapshot {
     $Cache.sharedPlayers = $newSharedPlayers
     $Cache.sharedGenerated = $generated
     $Cache.lastLeaderboardUpdated = $updated
+    $Cache.leaderboardUpdates = $updates
     $snapshotCounts = Get-ObjectProperty $snapshot 'counts'
     foreach ($realm in @('Nightslayer', 'Dreamscythe')) {
         $count = 0
@@ -818,11 +941,16 @@ function Sync-LeaderboardSeason {
             continue
         }
 
+        $stamp = Convert-SourceTime (Get-ObjectProperty $payload 'updated')
+        if ($IsCurrent -and $stamp -lt [int64]$Cache.leaderboardUpdates[[string]$bracket]) {
+            Write-Log ('Ignoring older {0}v{0} leaderboard.' -f $bracket)
+            continue
+        }
         if ($IsCurrent -or $Season -eq $Cache.previousSeason) {
             foreach ($cachedPlayer in $Cache.players.Values) {
                 if ($null -ne (Resolve-SupportedRealm ([string]$cachedPlayer.realm))) {
-                    $map = $(if ($IsCurrent) { $cachedPlayer.current } else { $cachedPlayer.previous })
-                    [void]$map.Remove([string]$bracket)
+                    if ($IsCurrent) { Mark-CurrentRatingMissing $cachedPlayer $bracket $stamp }
+                    else { [void]$cachedPlayer.previous.Remove([string]$bracket) }
                 }
             }
             foreach ($sharedPlayer in $Cache.sharedPlayers.Values) {
@@ -853,7 +981,7 @@ function Sync-LeaderboardSeason {
             $player.name = $name
             $player.lastSeen = $now
             if ($IsCurrent) {
-                $player.current[[string]$bracket] = $rating
+                Set-CurrentRating $player $bracket $rating $stamp
             } elseif ($Season -eq $Cache.previousSeason) {
                 $player.previous[[string]$bracket] = $rating
             }
@@ -880,10 +1008,12 @@ function Sync-LeaderboardSeason {
             $realmMatches[$canonicalRealm]++
         }
 
-        $payloadUpdated = Get-ObjectProperty $payload 'updated'
-        if ($IsCurrent -and $null -ne $payloadUpdated) {
-            $milliseconds = [double]$payloadUpdated
-            $Cache.lastLeaderboardUpdated = [int64][Math]::Floor($milliseconds / 1000)
+        if ($IsCurrent -and $stamp -gt 0) {
+            $Cache.leaderboardUpdates[[string]$bracket] = $stamp
+            $Cache.lastLeaderboardUpdated = [Math]::Max($Cache.lastLeaderboardUpdated, $stamp)
+        }
+        if ($IsCurrent) {
+            $Cache.status.mode = 'partial'
         }
 
         Write-Log ('Season {0} {1}v{1}: cached {2} players ({3} Nightslayer, {4} Dreamscythe)' -f $Season, $bracket, $matched, $realmMatches.Nightslayer, $realmMatches.Dreamscythe)
@@ -1011,18 +1141,24 @@ function Sync-QueuedProfiles {
     $candidates = @()
     $requests = @(Get-QueuedRequests -GamePath $GamePath -Cache $Cache)
     $queuedKeys = @{}
+    $Cache.status.failedProfiles = 0
+    $Cache.status.unavailableProfiles = 0
 
     foreach ($request in $requests) {
         $player = Get-PlayerRecord -Cache $Cache -Name $request.Name -Realm $request.Realm
+        $player.tracking = $true
+        Sync-PlayerCurrentFromShared $player $Cache.sharedPlayers $Cache.leaderboardUpdates
         $requestKey = (Normalize-Realm $request.Realm) + '|' + $request.Name.ToLowerInvariant()
         $queuedKeys[$requestKey] = $true
         $player.lastSeen = [Math]::Max([int64]$player.lastSeen, [int64]$request.Stamp)
         $notFoundUntil = [int64]$player.notFoundUntil
         $lastExact = [int64]$player.exactFetchedAt
         if ($notFoundUntil -gt $now) {
+            $Cache.status.unavailableProfiles++
             continue
         }
-        if ($lastExact -le 0 -or ($now - $lastExact) -ge $ProfileRefreshSeconds) {
+        $interval = Get-ProfileRefreshInterval -Request $request -Now $now
+        if ($lastExact -le 0 -or ($now - $lastExact) -ge $interval) {
             $candidates += $request
         }
     }
@@ -1030,10 +1166,17 @@ function Sync-QueuedProfiles {
     Write-Log ('Exact profiles: {0} due now, {1} already cached or temporarily unavailable.' -f `
         $candidates.Count, ($requests.Count - $candidates.Count))
 
+    # Missing peaks go first, then the longest-overdue refresh. A persistent
+    # failing profile cannot monopolize the front of the 50-request batch.
+    $candidates = @($candidates | Sort-Object -Property `
+        @{ Expression = { (Get-PlayerRecord $Cache $_.Name $_.Realm).exactFetchedAt -gt 0 } }, `
+        @{ Expression = { [int64]((Get-ObjectProperty (Get-PlayerRecord $Cache $_.Name $_.Realm) 'profileAttemptAt') -as [int64]) } })
     $processed = 0
     $missing = 0
     $transientErrors = 0
     foreach ($request in @($candidates | Select-Object -First $ProfileLimitPerRun)) {
+        $player = Get-PlayerRecord -Cache $Cache -Name $request.Name -Realm $request.Realm
+        $player.profileAttemptAt = $now
         $encodedRealm = [Uri]::EscapeDataString([string]$request.Realm)
         $encodedName = [Uri]::EscapeDataString([string]$request.Name)
         try {
@@ -1088,14 +1231,17 @@ function Sync-QueuedProfiles {
         }
 
         $seasonData = Get-ObjectProperty $profile ('season' + [string]$Cache.currentSeason)
-        $player.current = @{}
         foreach ($bracket in @(2, 3, 5)) {
             $bracketData = Get-ObjectProperty $seasonData ([string]$bracket)
             $ratingValue = Get-ObjectProperty $bracketData 'rating'
             $rating = 0
             if ([int]::TryParse([string]$ratingValue, [ref]$rating) -and
                 $rating -ge 1 -and $rating -le 10000) {
-                $player.current[[string]$bracket] = $rating
+                $stamp = Convert-SourceTime (Get-ObjectProperty $bracketData 'modified')
+                Set-CurrentRating $player $bracket $rating $stamp
+            } else {
+                # A missing bracket is not evidence of a zero rating.
+                Mark-CurrentRatingMissing $player $bracket $now
             }
         }
 
@@ -1108,6 +1254,9 @@ function Sync-QueuedProfiles {
 
     Write-Log ('Exact-profile batch: fetched {0}, not found {1}, transient errors {2}.' -f
         $processed, $missing, $transientErrors)
+    $Cache.status.pendingProfiles = [Math]::Max(0, $candidates.Count - $processed - $missing)
+    $Cache.status.failedProfiles = $transientErrors
+    $Cache.status.unavailableProfiles += $missing
 
     $exactCutoff = $now - $ExactCacheRetentionSeconds
     foreach ($key in @($Cache.players.Keys)) {
@@ -1159,6 +1308,21 @@ function Format-LuaRatingMap {
     return '{ ' + ($parts -join ', ') + ' }'
 }
 
+function Format-LuaRatingHistory {
+    param([hashtable]$History)
+    $parts = @()
+    foreach ($bracket in @(2, 3, 5)) {
+        $samples = @()
+        foreach ($sample in @(Get-ObjectProperty $History ([string]$bracket))) {
+            if ($null -ne $sample) {
+                $samples += ('{{ at = {0}, rating = {1} }}' -f [int64]$sample.at, [int]$sample.rating)
+            }
+        }
+        if ($samples.Count -gt 0) { $parts += ('[{0}] = {{ {1} }}' -f $bracket, ($samples -join ', ')) }
+    }
+    return '{ ' + ($parts -join ', ') + ' }'
+}
+
 function Format-LuaSharedPlayer {
     param($Player)
 
@@ -1190,6 +1354,7 @@ function Write-LuaData {
     [void]$builder.AppendLine(('        previousSeason = {0},' -f [int]$Cache.previousSeason))
     [void]$builder.AppendLine(('        generated = {0},' -f $now))
     [void]$builder.AppendLine(('        leaderboardUpdated = {0},' -f [int64]$Cache.lastLeaderboardUpdated))
+    [void]$builder.AppendLine(('        leaderboardUpdates = {0},' -f (Format-LuaRatingMap $Cache.leaderboardUpdates)))
     [void]$builder.AppendLine(('        sharedGenerated = {0},' -f [int64]$Cache.sharedGenerated))
     [void]$builder.AppendLine('        profileLookup = true,')
     [void]$builder.AppendLine('        counts = {')
@@ -1224,7 +1389,7 @@ function Write-LuaData {
     $outputPlayers = @()
     foreach ($player in $Cache.players.Values) {
         $isExact = [int64]$player.exactFetchedAt -gt 0
-        $hasData = $isExact
+        $hasData = $isExact -or $player.tracking
         foreach ($bracket in @(2, 3, 5)) {
             if ((Get-CachedRating -Map $player.current -Bracket $bracket) -gt 0 -or
                 (Get-CachedRating -Map $player.previous -Bracket $bracket) -gt 0 -or
@@ -1242,14 +1407,13 @@ function Write-LuaData {
 
     foreach ($player in @($outputPlayers | Sort-Object { ([string]$_.realm) + '|' + ([string]$_.name) })) {
         $best = @{}
+        $exactBrackets = @()
         $isExact = [int64]$player.exactFetchedAt -gt 0
         foreach ($bracket in @(2, 3, 5)) {
-            $value = 0
-            if ($isExact -and $player.exactBest.ContainsKey([string]$bracket)) {
-                $value = Get-CachedRating -Map $player.exactBest -Bracket $bracket
-            } else {
-                $value = Get-CachedRating -Map $player.bestSeen -Bracket $bracket
-            }
+            $exactValue = Get-CachedRating -Map $player.exactBest -Bracket $bracket
+            $observed = [Math]::Max((Get-CachedRating $player.bestSeen $bracket), (Get-CachedRating $player.current $bracket))
+            $value = [Math]::Max($exactValue, $observed)
+            if ($isExact -and $exactValue -gt 0 -and $exactValue -ge $observed) { $exactBrackets += ('[{0}] = true' -f $bracket) }
             if ($value -gt 0) {
                 $best[[string]$bracket] = $value
             }
@@ -1262,9 +1426,17 @@ function Write-LuaData {
         [void]$builder.AppendLine(('            name = "{0}",' -f $escapedName))
         [void]$builder.AppendLine(('            realm = "{0}",' -f $escapedRealm))
         [void]$builder.AppendLine(('            current = {0},' -f (Format-LuaRatingMap $player.current)))
+        [void]$builder.AppendLine(('            currentUpdated = {0},' -f (Format-LuaRatingMap $player.currentUpdated)))
+        [void]$builder.AppendLine(('            currentLastKnown = {0},' -f (Format-LuaRatingMap $player.currentLastKnown)))
+        [void]$builder.AppendLine(('            history = {0},' -f (Format-LuaRatingHistory $player.history)))
+        [void]$builder.AppendLine(('            tracking = {0},' -f $(if ($player.tracking) { 'true' } else { 'false' })))
+        [void]$builder.AppendLine(('            profileAttemptAt = {0},' -f [int64]$player.profileAttemptAt))
+        [void]$builder.AppendLine(('            notFoundUntil = {0},' -f [int64]$player.notFoundUntil))
         [void]$builder.AppendLine(('            previous = {0},' -f (Format-LuaRatingMap $player.previous)))
         [void]$builder.AppendLine(('            best = {0},' -f (Format-LuaRatingMap $best)))
         [void]$builder.AppendLine(('            exact = {0},' -f $(if ($isExact) { 'true' } else { 'false' })))
+        [void]$builder.AppendLine(('            exactBrackets = {{ {0} }},' -f ($exactBrackets -join ', ')))
+        [void]$builder.AppendLine(('            exactFetchedAt = {0},' -f [int64]$player.exactFetchedAt))
         [void]$builder.AppendLine('        },')
     }
 
@@ -1275,40 +1447,79 @@ function Write-LuaData {
     return $outputPlayers.Count + $Cache.sharedPlayers.Count
 }
 
+function Sync-ReleaseVersion {
+    param([hashtable]$Cache)
+    $now = Get-UnixTime
+    if ($Cache.status.lastVersionCheck -gt 0 -and ($now - $Cache.status.lastVersionCheck) -lt 86400) { return }
+    try {
+        $release = Get-NsrRelease
+        $Cache.status.availableVersion = $release.version
+    } catch {
+        Write-Log 'Version check unavailable; rating updates will continue.'
+    }
+    $Cache.status.lastVersionCheck = $now
+}
+
+function Write-SyncStatus {
+    param([hashtable]$Cache, [string]$AddonDirectory)
+    $lines = @('-- Download status; read by WoW at login/reload.', 'NightslayerRatingSyncStatus = {')
+    $lines += ('    installedVersion = "{0}",' -f $UpdaterVersion)
+    foreach ($key in @('lastAttempt', 'lastSuccess', 'pendingProfiles', 'failedProfiles', 'unavailableProfiles')) {
+        $lines += ('    {0} = {1},' -f $key, [Math]::Max(0, [int64]$Cache.status[$key]))
+    }
+    $mode = [string]$Cache.status.mode
+    if ($mode -notin @('shared', 'direct', 'partial', 'cached', 'failed', 'bundled', 'retained')) { $mode = 'failed' }
+    $lines += ('    mode = "{0}",' -f $mode)
+    $version = [string]$Cache.status.availableVersion
+    if ($version -match '^\d{1,3}\.\d{1,3}\.\d{1,3}$') { $lines += ('    availableVersion = "{0}",' -f $version) }
+    $lines += '}'
+    Write-AtomicUtf8 -Path (Join-Path $AddonDirectory 'SyncStatus.lua') -Content ($lines -join "`n")
+}
+
 function Update-RatingData {
     param([hashtable]$Cache, [string]$GamePath, [string]$AddonDirectory)
-
-    Initialize-BundledSnapshot -Cache $Cache
-    $sharedWorked = Sync-SharedSnapshot -Cache $Cache
-    if (-not $sharedWorked) {
-        $currentSeason = Find-CurrentSeason -Cache $Cache
-        Set-CacheSeason -Cache $Cache -Season $currentSeason
-        # Each successful bracket replaces only its own cached values. A 500,
-        # missing future season, or malformed response never clears good data.
-        [void](Sync-LeaderboardSeason -Cache $Cache -Season $currentSeason -IsCurrent $true)
-        for ($season = 1; $season -lt $currentSeason; $season++) {
-            if (@($Cache.syncedSeasons) -contains $season) { continue }
-            if (Sync-LeaderboardSeason -Cache $Cache -Season $season -IsCurrent $false) {
-                $Cache.syncedSeasons = @($Cache.syncedSeasons) + $season
+    $Cache.status.lastAttempt = Get-UnixTime
+    $Cache.status.mode = 'cached'
+    try {
+        Initialize-BundledSnapshot -Cache $Cache
+        $sharedWorked = Sync-SharedSnapshot -Cache $Cache
+        if (-not $sharedWorked) {
+            $currentSeason = Find-CurrentSeason -Cache $Cache
+            Set-CacheSeason -Cache $Cache -Season $currentSeason
+            if (Sync-LeaderboardSeason -Cache $Cache -Season $currentSeason -IsCurrent $true) {
+                $Cache.status.mode = 'direct'
+                $Cache.status.lastSuccess = Get-UnixTime
+            }
+            for ($season = 1; $season -lt $currentSeason; $season++) {
+                if (@($Cache.syncedSeasons) -contains $season) { continue }
+                if (Sync-LeaderboardSeason -Cache $Cache -Season $season -IsCurrent $false) {
+                    $Cache.syncedSeasons = @($Cache.syncedSeasons) + $season
+                }
             }
         }
-    }
-
-    Sync-RatingCutoffs -Cache $Cache
-    $profiles = Sync-QueuedProfiles -Cache $Cache -GamePath $GamePath
-    Save-Cache -Cache $Cache
-    $hasRatings = $Cache.sharedPlayers.Count -gt 0
-    foreach ($player in $Cache.players.Values) {
-        if ($player.current.Count -gt 0 -or $player.bestSeen.Count -gt 0 -or $player.exactBest.Count -gt 0) {
-            $hasRatings = $true
-            break
+        Sync-RatingCutoffs -Cache $Cache
+        $profiles = Sync-QueuedProfiles -Cache $Cache -GamePath $GamePath
+        Sync-ReleaseVersion -Cache $Cache
+        Save-Cache -Cache $Cache
+        $hasRatings = $Cache.sharedPlayers.Count -gt 0
+        foreach ($player in $Cache.players.Values) {
+            if ($player.current.Count -gt 0 -or $player.bestSeen.Count -gt 0 -or $player.exactBest.Count -gt 0) {
+                $hasRatings = $true
+                break
+            }
         }
-    }
-    if ($hasRatings) {
-        $playersWritten = Write-LuaData -Cache $Cache -AddonDirectory $AddonDirectory
-        Write-Log ('Sync complete: {0} cached players written, {1} exact profile lookups.' -f $playersWritten, $profiles)
-    } else {
-        Write-Log 'No rating data was available. Existing addon data was left unchanged; the next scheduled run will retry.'
+        if ($hasRatings) {
+            $playersWritten = Write-LuaData -Cache $Cache -AddonDirectory $AddonDirectory
+            Write-Log ('Sync complete ({0}): {1} cached players written, {2} exact profile lookups.' -f $Cache.status.mode, $playersWritten, $profiles)
+        } else {
+            Write-Log 'No rating data was available. Existing addon data was left unchanged; the next scheduled run will retry.'
+        }
+    } catch {
+        $Cache.status.mode = 'failed'
+        throw
+    } finally {
+        try { Save-Cache -Cache $Cache } catch { Write-Log ('Cache save failed: ' + $_.Exception.Message) }
+        try { Write-SyncStatus -Cache $Cache -AddonDirectory $AddonDirectory } catch { Write-Log ('Status write failed: ' + $_.Exception.Message) }
     }
 }
 

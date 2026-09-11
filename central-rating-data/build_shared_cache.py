@@ -31,7 +31,7 @@ HASH_ALGORITHM = "nsr-h4-v1"
 HASH_MODULI = (65_521, 65_519, 65_497, 65_479)
 HASH_BASES = (131, 137, 139, 149)
 USER_AGENT = (
-    "NightslayerRating/1.3.0 shared-cache publisher "
+    "NightslayerRating/1.4.0 shared-cache publisher "
     "(+https://github.com/noahbsark/tbc-addon-setup)"
 )
 FROZEN_CUTOFFS_PATH = (
@@ -165,6 +165,7 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
     hash_owners: dict[str, str] = {}
     seen_by_realm: dict[str, set[str]] = {realm: set() for realm in REALMS.values()}
     leaderboard_updated = 0
+    leaderboard_updates = {}
 
     for season in seasons:
         for bracket in BRACKETS:
@@ -181,6 +182,7 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
                     leaderboard_updated = max(
                         leaderboard_updated, int(float(payload.get("updated", 0)) / 1000)
                     )
+                    leaderboard_updates[str(bracket)] = int(float(payload.get("updated", 0)) / 1000)
                 except (TypeError, ValueError):
                     pass
             for row in rows:
@@ -230,6 +232,7 @@ def build_snapshot(client: ApiClient) -> dict[str, Any]:
         "cutoffs": build_cutoffs(client, current_season, generated),
         "realms": list(REALMS.values()),
         "leaderboardUpdated": leaderboard_updated,
+        "leaderboardUpdates": leaderboard_updates,
         "counts": counts,
         "players": ordered_players,
     }
@@ -281,6 +284,7 @@ def render_lua(snapshot: dict[str, Any]) -> str:
         f"        previousSeason = {int(snapshot.get('previousSeason', 0))},",
         f"        generated = {int(snapshot['generated'])},",
         f"        leaderboardUpdated = {int(snapshot['leaderboardUpdated'])},",
+        f"        leaderboardUpdates = {lua_rating_map(snapshot.get('leaderboardUpdates', {}))},",
         f"        sharedGenerated = {int(snapshot['generated'])},",
         "        profileLookup = false,",
         "        counts = {",
