@@ -153,4 +153,10 @@ wipe(lines)
 GameTooltip.NightslayerRatingToken = nil
 hooks.OnTooltipSetUnit(GameTooltip)
 assert(not table.concat(lines, "\n"):find("below Rank One", 1, true))
+data.players["Nightslayer|Twinname"].exactBrackets = { [3] = true }
+wipe(lines)
+GameTooltip.NightslayerRatingToken = nil
+hooks.OnTooltipSetUnit(GameTooltip)
+assert(table.concat(lines, "\n"):find("Observed |cff0070dd2400|r*", 1, true))
+assert(not table.concat(lines, "\n"):find("Peak |cff0070dd2400|r", 1, true))
 print("Rating color boundaries, season isolation, tooltip and whisper tests passed")

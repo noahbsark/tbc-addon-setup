@@ -44,13 +44,17 @@ def build(snapshot_path: Path) -> list[Path]:
             files[f"{prefix}/Updater/BundledSnapshot.json.gz"] = bundled_snapshot
         with ZipFile(artifact, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
             for name, payload in sorted(files.items()):
-                info = ZipInfo(name, date_time=(2026, 9, 10, 0, 0, 0))
+                info = ZipInfo(name, date_time=(2026, 9, 11, 0, 0, 0))
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = 0o100644 << 16
                 archive.writestr(info, payload)
         artifacts.append(artifact)
     checksums = "\n".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  downloads/{p.name}" for p in artifacts)
     (ROOT / "nightslayer-rating/checksums.txt").write_text(checksums + "\n")
+    windows = next(path for path in artifacts if path.name.endswith("-Windows.zip"))
+    manifest = {"version": version, "archive": windows.name,
+                "sha256": hashlib.sha256(windows.read_bytes()).hexdigest()}
+    (ROOT / "nightslayer-rating/latest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return artifacts
 
 

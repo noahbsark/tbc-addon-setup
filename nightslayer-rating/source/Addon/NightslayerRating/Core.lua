@@ -364,8 +364,20 @@ local function BestRating(record, bracket)
     return index and record[index] or nil
 end
 
-local function ExactRating(record)
-    return type(record) == "table" and record.exact == true
+local function ExactRating(record, bracket)
+    if type(record) ~= "table" or record.exact ~= true then return false end
+    if bracket and type(record.exactBrackets) == "table" then
+        return record.exactBrackets[bracket] == true or record.exactBrackets[tostring(bracket)] == true
+    end
+    return true
+end
+
+local function AllVisiblePeaksExact(record)
+    for _, bracket in ipairs(BRACKETS) do
+        if UI.Bracket(bracket) and (tonumber(BestRating(record, bracket)) or 0) > 0 and
+            not ExactRating(record, bracket) then return false end
+    end
+    return ExactRating(record)
 end
 
 local function CurrentSeason()
@@ -403,9 +415,9 @@ local function BracketSummary(record, bracket)
         "Current S" .. CurrentSeason() .. " " ..
             ColoredRating(CurrentRating(record, bracket), bracket, CurrentSeason()),
     }
-    parts[#parts + 1] = (ExactRating(record) and "Peak " or "Observed ") ..
+    parts[#parts + 1] = (ExactRating(record, bracket) and "Peak " or "Observed ") ..
         ColoredRating(BestRating(record, bracket), bracket, PEAK_COMPARISON_SEASON) ..
-        (ExactRating(record) and "" or "*")
+        (ExactRating(record, bracket) and "" or "*")
     return table.concat(parts, "   ")
 end
 
@@ -447,7 +459,7 @@ local function ShowWhisperRating(fullName)
     end
 
     local parts = {}
-    local exact = ExactRating(record)
+    local exact = AllVisiblePeaksExact(record)
     for _, bracket in ipairs(BRACKETS) do
         local current = CurrentRating(record, bracket)
         if HasBracketRating(record, bracket) then
@@ -507,7 +519,7 @@ local function AddRatingLines(tooltip, fullName, resultID)
         return
     end
 
-    local exact = ExactRating(record)
+    local exact = AllVisiblePeaksExact(record)
     local foundRating = false
 
     for _, bracket in ipairs(BRACKETS) do
@@ -627,7 +639,7 @@ local function AddVanillaRatingBlock(tooltip, fullName, resultID)
             displayLines[#displayLines + 1] = { "Not in the packaged leaderboard cache", 0.55, 0.55, 0.55 }
         end
     else
-        local exact = ExactRating(record)
+        local exact = AllVisiblePeaksExact(record)
         local foundRating = false
 
         for _, bracket in ipairs(BRACKETS) do

@@ -103,6 +103,14 @@ try {
     Assert ($lua.Contains('2058, 0, 0, 2900, 0, 0, 2481, 0, 0')) 'Nine-value shared row missing'
     Assert ($lua.Contains('previous = { [2] = 2481 }')) 'Named previous rating missing'
     Assert ($lua.Contains('2803, 2481, 1944, 1629, 1458')) 'Frozen Lua cutoffs missing'
+    Assert ($lua.Contains('exactBrackets = { [2] = true }')) 'Exact peak provenance missing'
+    $player.current['3'] = 2400
+    $player.bestSeen['3'] = 2400
+    $player.exactBest['3'] = 2300
+    [void](Write-LuaData $cache $directory)
+    $lua = Get-Content (Join-Path $directory 'Data.lua') -Raw
+    Assert ($lua.Contains('best = { [2] = 2900, [3] = 2400 }')) 'Newly observed high was hidden by an older exact peak'
+    Assert ($lua.Contains('exactBrackets = { [2] = true }')) 'Observed high was mislabeled as exact'
     Save-Cache $cache
     $roundtrip = Read-Cache
     Assert ($roundtrip.cutoffs['3']['2'].thresholds[0] -eq 2199) 'Cutoffs lost on disk'

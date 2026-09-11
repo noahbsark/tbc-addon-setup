@@ -790,6 +790,8 @@ function Import-SharedSnapshot {
             if ($sharedCurrent.ContainsKey($key)) {
                 $player.current[$key] = [int]$sharedCurrent[$key]
             }
+            $player.bestSeen[$key] = [Math]::Max((Get-CachedRating $player.bestSeen $bracket),
+                (Get-CachedRating $newSharedPlayers[$hash].bestSeen $bracket))
         }
     }
 
@@ -1310,14 +1312,13 @@ function Write-LuaData {
 
     foreach ($player in @($outputPlayers | Sort-Object { ([string]$_.realm) + '|' + ([string]$_.name) })) {
         $best = @{}
+        $exactBrackets = @()
         $isExact = [int64]$player.exactFetchedAt -gt 0
         foreach ($bracket in @(2, 3, 5)) {
-            $value = 0
-            if ($isExact -and $player.exactBest.ContainsKey([string]$bracket)) {
-                $value = Get-CachedRating -Map $player.exactBest -Bracket $bracket
-            } else {
-                $value = Get-CachedRating -Map $player.bestSeen -Bracket $bracket
-            }
+            $exactValue = Get-CachedRating -Map $player.exactBest -Bracket $bracket
+            $observed = [Math]::Max((Get-CachedRating $player.bestSeen $bracket), (Get-CachedRating $player.current $bracket))
+            $value = [Math]::Max($exactValue, $observed)
+            if ($isExact -and $exactValue -gt 0 -and $exactValue -ge $observed) { $exactBrackets += ('[{0}] = true' -f $bracket) }
             if ($value -gt 0) {
                 $best[[string]$bracket] = $value
             }
@@ -1333,6 +1334,7 @@ function Write-LuaData {
         [void]$builder.AppendLine(('            previous = {0},' -f (Format-LuaRatingMap $player.previous)))
         [void]$builder.AppendLine(('            best = {0},' -f (Format-LuaRatingMap $best)))
         [void]$builder.AppendLine(('            exact = {0},' -f $(if ($isExact) { 'true' } else { 'false' })))
+        [void]$builder.AppendLine(('            exactBrackets = {{ {0} }},' -f ($exactBrackets -join ', ')))
         [void]$builder.AppendLine(('            exactFetchedAt = {0},' -f [int64]$player.exactFetchedAt))
         [void]$builder.AppendLine('        },')
     }

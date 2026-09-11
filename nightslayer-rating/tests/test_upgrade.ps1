@@ -35,6 +35,7 @@ try {
     try { Assert-NsrArchiveHash $payload ('a' * 64) } catch { $rejected = $true }
     Assert $rejected 'Modified download accepted'
 
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     function New-FixtureZip {
         param([string]$Path, [hashtable]$Entries)

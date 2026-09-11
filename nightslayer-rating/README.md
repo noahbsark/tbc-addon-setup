@@ -1,8 +1,23 @@
 # Nightslayer Rating
 
-Free World of Warcraft TBC Anniversary addon for Nightslayer and Dreamscythe US. It adds current-season, observed, and lifetime-peak 2v2, 3v3, and 5v5 ratings to Group Finder tooltips, normal player tooltips, and a private local summary when someone whispers you.
+Free World of Warcraft TBC Anniversary addon for Nightslayer and Dreamscythe US. It adds Current and lifetime Peak 2v2, 3v3, and 5v5 ratings to Group Finder tooltips, player tooltips, and private whisper summaries, with an optional highest known arena title.
 
 [Download and install](https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/) · [Report a bug](https://github.com/noahbsark/tbc-addon-setup/issues) · [Shared data status](https://github.com/noahbsark/tbc-addon-setup/releases/tag/ratings-data)
+
+## New in 1.4.0
+
+- `/nsr options` opens display preferences: Group Finder, player tooltips, private whisper summaries, 2v2/3v3/5v5 filters, known titles, and compact mode. Shift-hover reveals details, including distance to the next **current-season** cutoff. Unknown cutoffs have no invented distance; stale cutoffs are labeled.
+- `/nsr status` separates the source rating/cutoff age from the latest download attempt. It reports complete, partial, failed, or retained-cache results and pending/unavailable peak lookups. Per-bracket source timestamps prevent a fresh 3v3 update from making stale 2v2 data appear fresh. Status is loaded at login or `/reload`.
+- Exact peaks refresh daily for your local characters and priority players viewed within the last three days. Less active profiles remain on a weekly cache. The existing 50-requests-per-run budget remains; persistent failures rotate behind untried requests.
+- The companion checks for new addon versions daily and displays a notification in game. To apply one, close WoW and run **Upgrade.cmd**, also available under **Nightslayer Rating → Upgrade** in the Windows Start menu. The helper checks the release manifest, ZIP checksum, paths, and version before installing. The installer preserves rating caches, backs up the previous installation, and attempts automatic rollback if file replacement fails. Hourly background tasks continue to refresh data; code upgrades run only when you launch the helper.
+
+### Highest known arena title
+
+This is **the highest arena title this client has confirmed**, rather than a complete title history for every player. For your own character, the addon reads the game's owned-title list. For another visible character, it records an arena title actually displayed in the unit's PvP name. It retains the highest observed tier and distinguishes same-name characters by realm and, when visible, GUID. An unknown title is omitted. Title observations are stored only in your local SavedVariables; they are never uploaded or added to the public shared cache.
+
+The recognized English-client arena titles are Challenger, Rival, Duelist, Gladiator, and the named TBC Rank One titles. Rank One variants are the same tier; the most recently observed variant is displayed. The addon cannot see every unequipped title another character owns. A Group Finder player can show a known title after this client has observed that character in game.
+
+IronForge exposes `reward_list` and per-season `title` fields, but its profile UI calls that history **previous placements**, and its current-season title field includes still-unearned cutoff ranges. Those fields and rating colors are not used as proof of title ownership. Game API references: [title functions](https://github.com/Gethe/wow-ui-source/blob/classic_anniversary/Interface/AddOns/Blizzard_APIDocumentationGenerated/TitleDocumentation.lua), [unit PvP name](https://github.com/Gethe/wow-ui-source/blob/classic_anniversary/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua).
 
 ## What the numbers mean
 
@@ -25,7 +40,7 @@ Thresholds are inclusive. Current S3 ratings use the live [2v2](https://ironforg
 
 On a future season rollover, Current follows the snapshot season. Peak/Observed keeps the same fixed S2 color comparison. Colors describe a rating range and do not claim an earned title.
 
-To upgrade from 1.2.x, close WoW, extract the **1.3.1 Windows bundle**, and run `Install.cmd` again. This installs the new coloring code and companion while preserving the existing exact-profile cache. Subsequent data and cutoff changes use the existing updater; log in or `/reload` to see them. The addon-only ZIP is a point-in-time snapshot and does not refresh itself.
+To upgrade from 1.3.1 or earlier, close WoW, extract the **1.4.0 Windows bundle**, and run `Install.cmd`. This installs the new code and upgrade helper while preserving your exact-profile cache and game settings. Subsequent code releases can use `Upgrade.cmd`. Data and cutoff changes use the existing updater; log in or `/reload` to see them. The addon-only ZIP is a point-in-time snapshot and does not refresh itself.
 
 Version 1.3.1 accepts the existing v4/v5 shared snapshots as well as v6. The Windows bundle includes the same snapshot in a format the companion can load locally, so a fresh install works during a source outage. Failed or empty leaderboard requests preserve their cached bracket values, and a failed future-season probe cannot advance the season. An update with no usable data leaves the existing Data.lua untouched.
 

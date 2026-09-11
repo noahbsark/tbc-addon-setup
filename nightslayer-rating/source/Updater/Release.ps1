@@ -67,6 +67,7 @@ function Assert-NsrArchiveHash {
 function Expand-NsrRelease {
     param([string]$ArchivePath, [string]$Destination, [string]$Version)
     if ($Version -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$') { throw 'Invalid release version.' }
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
     $rootName = 'NightslayerRating-' + $Version
