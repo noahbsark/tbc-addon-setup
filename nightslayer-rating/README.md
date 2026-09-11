@@ -4,7 +4,15 @@ Free World of Warcraft TBC Anniversary addon for Nightslayer and Dreamscythe US.
 
 [Download and install](https://noahbsark.github.io/tbc-addon-setup/nightslayer-rating/) · [Report a bug](https://github.com/noahbsark/tbc-addon-setup/issues) · [Shared data status](https://github.com/noahbsark/tbc-addon-setup/releases/tag/ratings-data)
 
-## New in 1.4.1
+## New in 1.4.2
+
+**Process the entire queue:** type `/reload` in WoW to save queued names, then open **Windows Start menu → Nightslayer Rating → Process Queue**, or run `Process Queue.cmd` from the extracted Windows bundle after installation. It takes one pass through all profiles currently due, saves cache/data/status every 50 attempts, and shows progress. Press **Q** to save and stop after the current request; running it again skips recently completed profiles. You can leave WoW open; `/reload` again afterward and use `/nsr status` to see results. `/nsr queue` shows these instructions in game.
+
+Queue mode waits at least one second after each successful or unavailable profile and pauses five seconds between batches. For 850 successful requests, pacing alone takes about 15½ minutes, plus network time. A profile is attempted once per pass; missing profiles retain their normal retry schedule, and temporary failures stay pending. HTTP 429 stops further requests immediately; five consecutive profile errors pause a full queue pass. A hard close preserves completed checkpoints; Q also saves the partial batch. New names saved while it runs wait for the next pass. This fetches ratings and lifetime peaks where available; it cannot retrieve unobserved owned titles for everyone.
+
+The hourly/sign-in updater and **Update Now** still attempt at most 50 profiles per run. Full queue mode runs only when explicitly launched. Both modes use the same mutex so they cannot overwrite each other's progress. `/nsr status` reports the last saved queue progress, fetched/unavailable/retry counts, and whether that pass finished, stopped, paused or was interrupted.
+
+### Included 1.4.1 upgrades
 
 - `/nsr search [Name-Realm]` opens a player search window with Current, Peak, highest known title, per-bracket source age and profile lookup status. `/nsr lookup` is an alias. A bare name uses your supported home realm; use a realm suffix for the other realm. It searches exact names in the loaded cache and queues a profile request. Save new requests with `/reload`, run **Update Now** in Windows, then `/reload` again to load the result.
 - A locally tracked player's rating survives disappearing from the shared leaderboard or a successful direct fallback. Missing, undated, or older-than-48-hour values show **Last known** with their age. Older or undated sources cannot overwrite a newer dated rating. Missing data is not interpreted as zero. Current ratings, their dates and history reset at season rollover; lifetime peaks remain.
@@ -46,7 +54,7 @@ Thresholds are inclusive. Current S3 ratings use the live [2v2](https://ironforg
 
 On a future season rollover, Current follows the snapshot season. Peak/Observed keeps the same fixed S2 color comparison. Colors describe a rating range and do not claim an earned title.
 
-To upgrade from 1.3.1 or earlier, close WoW, extract the **1.4.1 Windows bundle**, and run `Install.cmd`. This installs the new code and upgrade helper while preserving your exact-profile cache and game settings. Users with 1.4.0 can use `Upgrade.cmd` once 1.4.1 is merged and published; before publication, install the extracted test bundle manually. Data and cutoff changes use the existing updater; log in or `/reload` to see them. The addon-only ZIP is a point-in-time snapshot and does not refresh itself.
+To install or test 1.4.2, close WoW, extract the **1.4.2 Windows bundle**, and run `Install.cmd`. This preserves your profile cache, queue and settings and installs the Process Queue shortcut. Once 1.4.2 is merged and published, users with 1.4.0/1.4.1 can instead use `Upgrade.cmd`. Data and cutoff changes use the existing updater; log in or `/reload` to see them. The addon-only ZIP is a point-in-time snapshot and does not refresh itself.
 
 Version 1.3.1 accepts the existing v4/v5 shared snapshots as well as v6. The Windows bundle includes the same snapshot in a format the companion can load locally, so a fresh install works during a source outage. Failed or empty leaderboard requests preserve their cached bracket values, and a failed future-season probe cannot advance the season. An update with no usable data leaves the existing Data.lua untouched.
 

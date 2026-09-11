@@ -18,7 +18,7 @@ function Get-NsrBytes {
     $request.Timeout = 30000
     $request.ReadWriteTimeout = 30000
     $request.AllowAutoRedirect = $false
-    $request.UserAgent = 'NightslayerRating/1.4.1 version check'
+    $request.UserAgent = 'NightslayerRating/1.4.2 version check'
     $response = $null
     $stream = $null
     $memory = New-Object IO.MemoryStream

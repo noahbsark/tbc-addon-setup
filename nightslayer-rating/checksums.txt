@@ -1,2 +1,2 @@
-3d41265a9eb0c8b8fea3ffe96e2c3f9140808c5194921ad3850fd73c3b9dd6aa  downloads/NightslayerRating-1.4.1-AddonOnly.zip
-4275244df1580fec8dc044aefa7e7952c410d9f369636de4885489dc96108a18  downloads/NightslayerRating-1.4.1-Windows.zip
+2d7e1466ee9a39b332ce10d4afd60901c59844fd3bf5f35b11f901deef785c8f  downloads/NightslayerRating-1.4.2-AddonOnly.zip
+1d7af440176dda18e8c85ccc10560fca8b18318db18a996a47dcc7ad33830100  downloads/NightslayerRating-1.4.2-Windows.zip

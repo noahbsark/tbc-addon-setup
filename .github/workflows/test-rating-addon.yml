@@ -89,5 +89,6 @@ jobs:
         run: |
           ./nightslayer-rating/tests/test_updater.ps1
           ./nightslayer-rating/tests/test_profile_refresh.ps1
+          ./nightslayer-rating/tests/test_process_queue.ps1
           ./nightslayer-rating/tests/test_rating_history.ps1
           ./nightslayer-rating/tests/test_upgrade.ps1

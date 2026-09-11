@@ -1,4 +1,20 @@
-NIGHTSLAYER RATING 1.4.1
+NIGHTSLAYER RATING 1.4.2
+
+WHAT CHANGED IN 1.4.2
+- Process Queue.cmd (also in Windows Start menu > Nightslayer Rating) processes
+  all currently due profiles in one pass. /reload in WoW first to save queued
+  names. You can leave WoW open while it works, then /reload to load results.
+- Progress shows attempted, fetched, unavailable and retry counts. Data and
+  cache save every 50 attempts. Press Q to save the partial batch and stop after
+  the current request. Relaunch to continue; completed fresh profiles are skipped.
+- Queue mode waits at least 1 second per successful/unavailable profile and
+  5 seconds between batches. For 850 successful requests, allow about 15.5
+  minutes of pacing plus network time. Each profile is attempted once per pass.
+- HTTP 429 stops requests; five consecutive profile errors pause queue mode.
+  Unavailable profiles retain their retry schedule. Failed and unattempted
+  profiles remain queued. A hard close retains completed checkpoints.
+- /nsr queue explains the Windows shortcut; /nsr status shows saved progress.
+  Normal hourly/sign-in updates and Update Now still attempt at most 50 profiles.
 
 WHAT CHANGED IN 1.4.1
 - /nsr search [Name-Realm] opens a player search window. /nsr lookup is an
@@ -201,6 +217,7 @@ OPTIONAL COMMANDS
 /nsr off                          Disable tooltip and chat additions
 /nsr cutoffs                      Show current/S2 comparison cutoff details
 /nsr search                       Open player search
+/nsr queue                        Explain full queue processing in Windows
 /nsr lookup Reefey-Nightslayer     Search and queue a Nightslayer character
 /nsr lookup Player-Dreamscythe     Search and queue a Dreamscythe character
 

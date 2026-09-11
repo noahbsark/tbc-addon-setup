@@ -1,6 +1,6 @@
 NightslayerRatingUI = {}
 local UI = NightslayerRatingUI
-UI.version = "1.4.1"
+UI.version = "1.4.2"
 local defaults = {
     enabled = true, groupFinder = true, units = true, whispers = true,
     compact = true, nextCutoff = true, titles = true,
