@@ -111,7 +111,7 @@ data.players["Nightslayer|Twinname"][7] = 2481
 assert(loadfile(addon .. "Core.lua"))("NightslayerRating")
 events.OnEvent(nil, "CHAT_MSG_WHISPER", "ignored", "Twinname-Nightslayer")
 assert(not messages[3]:find("S2 ", 1, true))
-assert(messages[3]:find("Inactive", 1, true))
+assert(messages[3]:find("No current data", 1, true))
 
 -- An identical lifetime peak gets a different S2 color in each bracket;
 -- S3 color changes must never recolor that fixed historical comparison.

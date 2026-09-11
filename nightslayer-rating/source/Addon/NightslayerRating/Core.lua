@@ -401,6 +401,7 @@ local function ColoredRating(value, bracket, season)
 end
 
 local function RatingBandLabel(current, bracket)
+    if (tonumber(current) or 0) <= 0 then return "|cffaaaaaaNo current data|r" end
     local band = Colors.Band(data, current, bracket, CurrentSeason())
     return Colors.Text(band, band.label)
 end

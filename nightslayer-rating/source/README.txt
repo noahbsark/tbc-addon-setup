@@ -1,4 +1,19 @@
-NIGHTSLAYER RATING 1.4.0
+NIGHTSLAYER RATING 1.4.1
+
+WHAT CHANGED IN 1.4.1
+- /nsr search [Name-Realm] opens a player search window. /nsr lookup is an
+  alias. A bare name uses your supported home realm. Search shows cached
+  Current, Peak, highest known title, source dates and profile lookup status.
+- Unlisted players retain a Last known current-season rating with its age.
+  Undated or older-than-48-hour ratings are also labeled Last known. Missing
+  data does not mean zero. Older sources cannot replace a newer dated rating.
+- Locally tracked players collect up to 32 daily observations per bracket
+  over 31 days. Search and Shift-hover show the actual observed change over
+  up to seven days. History starts with tracking and is never uploaded.
+  Repeated source timestamps add no samples. Season rollover clears current
+  ratings and history while retaining lifetime peaks and fixed S2 colors.
+- The release workflow tests and packages both ZIPs from one snapshot, checks
+  source/TOC/bootstrap/checksum agreement, and prepares a reviewable release PR.
 
 WHAT CHANGED IN 1.4.0
 ---------------------
@@ -185,8 +200,9 @@ OPTIONAL COMMANDS
 /nsr on                           Enable tooltip and chat additions
 /nsr off                          Disable tooltip and chat additions
 /nsr cutoffs                      Show current/S2 comparison cutoff details
-/nsr lookup Reefey                Queue a Nightslayer character
-/nsr lookup Player-Dreamscythe    Queue a Dreamscythe character
+/nsr search                       Open player search
+/nsr lookup Reefey-Nightslayer     Search and queue a Nightslayer character
+/nsr lookup Player-Dreamscythe     Search and queue a Dreamscythe character
 
 "Update Now.cmd" is included for troubleshooting; normal use does not require it.
 Data refreshes continue hourly and at Windows sign-in. New code versions are

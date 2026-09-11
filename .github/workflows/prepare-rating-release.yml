@@ -1,0 +1,54 @@
+name: Prepare rating release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-rating-release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test-rating-addon.yml
+    with:
+      skip_release_validation: true
+  prepare:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download the shared snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download ratings-data --repo "$GITHUB_REPOSITORY" --pattern shared-cache.json.gz --dir "$RUNNER_TEMP/nsr-release"
+      - name: Build and verify both bundles and the upgrade manifest
+        id: package
+        run: |
+          python tools/package_rating_addon.py --snapshot "$RUNNER_TEMP/nsr-release/shared-cache.json.gz"
+          python -c 'import json; print("version=" + json.load(open("nightslayer-rating/latest.json"))["version"])' >> "$GITHUB_OUTPUT"
+      - name: Preserve verified release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightslayer-rating-release
+          path: |
+            nightslayer-rating/downloads/NightslayerRating-${{ steps.package.outputs.version }}-AddonOnly.zip
+            nightslayer-rating/downloads/NightslayerRating-${{ steps.package.outputs.version }}-Windows.zip
+            nightslayer-rating/latest.json
+            nightslayer-rating/checksums.txt
+            nightslayer-rating/index.html
+          retention-days: 14
+      - name: Open the release pull request and dispatch validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/prepare_rating_release.py

@@ -24,7 +24,7 @@ $ProfileErrorDelayMilliseconds = 3000
 $ProfileRefreshSeconds = 604800
 $ActiveProfileRefreshSeconds = 86400
 $ActivePlayerSeconds = 3 * 86400
-$UpdaterVersion = '1.4.0'
+$UpdaterVersion = '1.4.1'
 $RequestRetentionSeconds = 2592000
 $ExactCacheRetentionSeconds = 7776000
 $PriorityOffset = 2000000000
@@ -245,7 +245,7 @@ function Mark-CurrentRatingMissing {
     param([hashtable]$Player, [int]$Bracket, [int64]$Updated)
     $key = [string]$Bracket
     $oldStamp = [int64]((Get-ObjectProperty $Player.currentUpdated $key) -as [int64])
-    if ($Player.current.ContainsKey($key) -and ($Updated -eq 0 -or $Updated -ge $oldStamp)) {
+    if ($Player.current.ContainsKey($key) -and $Updated -ge $oldStamp) {
         $Player.currentLastKnown[$key] = 1
     }
 }

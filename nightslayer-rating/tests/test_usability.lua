@@ -20,13 +20,13 @@ assert(Colors.NextCutoff(data, 1863, 2):find("stale cutoff", 1, true))
 data.cutoffs[3][2] = nil
 assert(Colors.NextCutoff(data, 1863, 2) == nil)
 NightslayerRatingSyncStatus = { mode = "cached", lastAttempt = time(), lastSuccess = time() - 3 * 86400,
-    pendingProfiles = 14, failedProfiles = 2, availableVersion = "1.4.1" }
+    pendingProfiles = 14, failedProfiles = 2, availableVersion = "999.0.0" }
 local status = table.concat(UI.StatusLines(data, true, { exact = true, exactFetchedAt = time() - 86400 }), "\n")
 assert(status:find("3d ago (stale)", 1, true)) -- never use the freshly generated timestamp
 assert(status:find("Download failed", 1, true))
 assert(status:find("Peak checked: 1d ago", 1, true))
 assert(status:find("pending: 14", 1, true))
-assert(status:find("1.4.1 available", 1, true))
+assert(status:find("999.0.0 available", 1, true))
 assert(UI.NewerVersion("1.10.0", "1.9.0"))
 assert(not UI.NewerVersion("1.4.0", "1.4.0"))
 assert(not UI.NewerVersion("bad", "1.4.0"))

@@ -2,10 +2,15 @@ name: Test rating addon
 
 on:
   workflow_call:
+    inputs:
+      skip_release_validation:
+        type: boolean
+        default: false
   workflow_dispatch:
   push:
     paths:
       - ".github/workflows/test-rating-addon.yml"
+      - ".github/workflows/prepare-rating-release.yml"
       - "nightslayer-rating/source/**"
       - "nightslayer-rating/tests/**"
       - "central-rating-data/**"
@@ -13,6 +18,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/test-rating-addon.yml"
+      - ".github/workflows/prepare-rating-release.yml"
       - "nightslayer-rating/**"
       - "central-rating-data/**"
       - "tools/*rating*.py"
@@ -30,6 +36,11 @@ jobs:
           persist-credentials: false
       - name: Test snapshot publisher
         run: python -m unittest central-rating-data/test_build_shared_cache.py
+      - name: Test release packaging
+        run: python -m unittest discover -s tools -p 'test_rating_*.py'
+      - name: Verify packaged source, bootstrap and checksums
+        if: ${{ !inputs.skip_release_validation }}
+        run: python tools/package_rating_addon.py --verify
       - name: Test Lua 5.1 rating colors and addon entry points
         run: |
           sudo apt-get update -qq

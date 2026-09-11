@@ -1,6 +1,6 @@
 NightslayerRatingUI = {}
 local UI = NightslayerRatingUI
-UI.version = "1.4.0"
+UI.version = "1.4.1"
 local defaults = {
     enabled = true, groupFinder = true, units = true, whispers = true,
     compact = true, nextCutoff = true, titles = true,
@@ -73,7 +73,7 @@ function UI.OpenOptions()
         note:SetPoint("BOTTOMLEFT", 18, 25)
         note:SetWidth(350)
         note:SetJustifyH("LEFT")
-        note:SetText("Peak colors use fixed S2 cutoffs.\n/nsr status shows data age and download results.")
+        note:SetText("/nsr search opens player search. Peak colors use S2 cutoffs.\n/nsr status shows data age and download results.")
     end
     for key, check in pairs(panel.checks) do check:SetChecked(UI.Settings()[key]) end
     panel:Show()
